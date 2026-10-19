@@ -1,0 +1,2 @@
+# Agent-Team
+以Codex为主导，协同DeepSeekHarness和DouBao，其中，DeepSeekHarness主要负责方案规划与设计，DouBao主要负责信息搜集与整理，Codex主要负责拆解目标、整合方案并执行修改，三个Agent作为团队共同完成项目。
