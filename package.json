@@ -1,0 +1,27 @@
+{
+  "name": "agent-team-mvp",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local Codex, DeepSeek Harness, and Doubao Desktop collaboration prototype",
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"npm:server:dev\" \"npm:web:dev\"",
+    "server:dev": "node --watch server/index.mjs",
+    "web:dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "start": "node server/index.mjs",
+    "start:team": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-agent-team.ps1",
+    "check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-prerequisites.ps1",
+    "setup:doubao": "powershell -NoProfile -ExecutionPolicy Bypass -File ./bridges/codex-doubao-desktop-gateway/scripts/install-windows.ps1"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "@deepseek-ai/dsh": "0.2.0-rc.2",
+    "concurrently": "^9.1.2",
+    "vite": "^6.0.5"
+  }
+}

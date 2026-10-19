@@ -1,0 +1,14 @@
+node_modules/
+dist/
+data/
+artifacts/
+tasks/*.jsonl
+team/tasks/*.json
+bridges/**/node_modules/
+bridges/codex-doubao-desktop-gateway/deps/
+bridges/codex-doubao-desktop-gateway/data/
+.env*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
