@@ -1,0 +1,20 @@
+{
+  "name": "dsh-mcp-connector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP stdio server that delivers messages from an external AI client into a local DeepSeek Harness installation",
+  "type": "module",
+  "bin": {
+    "dsh-mcp-connector": "./server.mjs"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "selftest": "node selftest.mjs",
+    "test": "node selftest.mjs",
+    "test:offline": "node selftest.mjs --offline",
+    "queue": "node queue.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

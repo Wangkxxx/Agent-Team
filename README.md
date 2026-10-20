@@ -1,21 +1,24 @@
 # Agent Team Workbench
 
-Windows 本机多 agent 协作工作台。由 Codex 负责拆解和执行任务，按需调用 DeepSeek Harness 进行方案规划，调用豆包桌面端搜集与整理信息。工作台实时展示运行事件、worker 回复和待确认操作。
+Windows 本机多 agent 协作工作台。用户在一个窗口提交目标，由 Codex 负责协调和实际执行，按任务需要调用 DeepSeek Harness 与豆包桌面端。工作台展示计划、成员状态、交互请求、执行记录和任务产物。
 
-## 环境要求
+## 功能
 
-- Windows 10 或更新版本
-- Node.js 22 或更新版本
-- Git（用于安装固定版本的豆包 CLI）
-- Codex 桌面端，以及已配置的本地 MCP servers
-- DeepSeek Harness CLI 和可用的 headless profile
-- 已登录的豆包桌面端
+- **按专长协作**：Codex 负责拆解、代码修改和验收；DeepSeek Harness 负责方案规划与设计复核；豆包负责信息搜集与整理。简单任务可由 Codex 独立完成，不要求每个任务都调用所有成员。
+- **复杂任务先确认计划**：工作台可以先展示目标、启用成员和工作区写入模式。用户可以批准执行、要求修改计划或放弃；计划获批前不会启动 agent。
+- **任务与进度可追踪**：成员回复、工具调用和状态变化进入时间线；任务结构区显示根任务和已派发子任务的负责人、依赖、状态、尝试次数、验收条件和证据摘要。
+- **执行期间可以沟通**：用户可以在运行中追加指引，让 Codex 在当前回合中调整执行方向。成员邮箱支持留存给 Codex、DeepSeek 或豆包的留言，由 Codex 在后续协调时决定是否转达。
+- **交互式提问**：需要用户决定时，Codex 可提交选项、文本、数字、布尔值或多选问题，并提供补充说明输入框。回答会回到等待中的会话。
+- **操作确认有边界**：所选工作区内符合规则的常规操作可自动继续；高风险命令、工作区外访问和未识别操作仍请求用户确认。Codex、DeepSeek 和豆包是否可修改所选工作区由任务写入开关决定。
+- **停止与恢复**：停止会中断 Codex，并向本轮正在运行的 DeepSeek 与豆包任务发送停止信号；已经完成的文件修改不会撤销。停止后的任务可填写原因再恢复，明确停止的 worker 不会被悄悄重新启动。
+- **长对话和长任务**：DeepSeek connector 提供短时等待、继续等待和取消工具，避免单次 MCP 超时被误认为任务失败；豆包未确认完成时沿用原 `conversationId`/`runId` 继续等待，不重复发送任务。工作台重启后可继续已保存的 Codex 对话上下文。
+- **本地记录管理**：任务标题可修改；Markdown/GFM 消息可直接阅读；可查看事件审计和成员留言。删除工作台对话会永久删除其本地运行、审计和邮箱记录，不删除工作区内的代码文件，也不删除各 agent 客户端保存的原始会话。
 
-本项目不包含账号凭据。请在各自客户端中完成登录和配置，不要将凭据文件放入仓库。
+## 快速开始
 
-## 安装与启动
+需要 Windows 10 或更新版本、Node.js 22 或更新版本、Git、Codex 桌面端、DeepSeek Harness CLI，以及已登录的豆包桌面端。DSH 和豆包 MCP server 必须先在 Codex 中配置。
 
-克隆仓库后，在项目根目录运行：
+克隆后在项目根目录运行：
 
 ```powershell
 npm ci
@@ -23,45 +26,19 @@ npm ci --prefix .\bridges\codex-doubao-desktop-gateway
 npm run setup:doubao
 ```
 
-也可以双击项目根目录的 [启动 Agent Team.cmd](./启动%20Agent%20Team.cmd)。启动器会复用已运行的工作台，或在后台启动本机 API，并打开 [http://127.0.0.1:4174](http://127.0.0.1:4174)。它不会启动、重启或控制 Codex、DSH 或豆包客户端。
+桥接项目的源码和各自许可证已直接纳入仓库，不需要 `git submodule update`。`setup:doubao` 只安装固定版本的豆包 CLI 依赖，不会启动或重启豆包。
 
-也可在终端运行 `npm run start:team`。
-
-首次使用前，请按下文配置两个 Codex MCP servers。DSH 需要为 headless profile 配置可用模型和对应认证。更完整的 bridge 说明见 [DSH connector](./bridges/dsh-ai-bridge/README.md) 和 [豆包 gateway](./bridges/codex-doubao-desktop-gateway/README.md)。
-
-### 日常启动
-
-每次开机后，先启动并登录 Codex 与 DeepSeek Harness。豆包需要通过本机 CDP 端口启动，普通双击豆包图标不会启用这个端口。打开项目根目录下的 PowerShell，填入本机豆包程序路径并运行：
+启用豆包 CDP 前，先保存豆包中的未发送内容。下面将重启豆包并在本机启用调试端口；将路径替换为本机实际安装路径：
 
 ```powershell
-$env:DOUBAO_APP = 'C:\Path\To\Doubao.exe' # 改为本机实际路径
+$env:DOUBAO_APP = 'C:\Path\To\Doubao.exe'
 $env:DOUBAO_DATA_DIR = "$env:LOCALAPPDATA\Doubao\User Data"
 $env:DOUBAO_CLI_ENTRY = (Resolve-Path .\bridges\codex-doubao-desktop-gateway\deps\doubao-cli\bin\doubao.mjs).Path
 $env:DOUBAO_CLI_CONFIG_DIR = (Join-Path (Get-Location) 'bridges\codex-doubao-desktop-gateway\data')
 node $env:DOUBAO_CLI_ENTRY --app doubao cdp launch --yes --json
 ```
 
-确认结果包含 `"available": true` 后，再双击“启动 Agent Team.cmd”。如果豆包已经打开但没有 CDP 端口，该命令会重启豆包；先保存未发送的内容。也可以运行 `npm run check` 确认本机连接状态。
-
-运行时在工作台填写一个存在的本机工作区绝对路径和任务目标。新任务默认允许 Codex、DeepSeek 和豆包在所选工作区内按分配范围修改文件；关闭“允许修改工作区”可切换为只读。Codex 的高风险命令、工作区外访问和未识别操作仍需确认。
-
-任务标题可通过标题栏的铅笔按钮修改。Codex、DeepSeek 和豆包的消息会按“你的消息”“最终答复”和“执行过程”区分，执行过程默认用较低的视觉优先级显示；Codex 和 worker 返回的 Markdown 与 GFM 表格会直接渲染，原始内容仍可展开查看。
-
-任务执行期间可以继续在底部输入框追加指引。工作台会把指引发送到当前 Codex 回合，DeepSeek 与豆包继续各自的后台工作；Codex 会根据新指引决定是否需要停止或改派成员。标题栏的“停止任务”会中断 Codex，并向本轮记录中的 DeepSeek 和豆包任务发送停止请求，已经完成的文件修改不会撤销。
-
-如果 Codex 需要用户决定，它可以显示带选项的提问卡；选项之外的要求可以写入补充说明，提交后会回传到等待中的回合。
-
-开发模式：
-
-```powershell
-npm run dev
-```
-
-Vite 页面位于 [http://127.0.0.1:5173](http://127.0.0.1:5173)，本机 API 监听 `127.0.0.1:4174`。发布构建可运行 `npm run build`，然后用 `npm start` 启动。
-
-## 配置 Codex MCP
-
-在仓库根目录打开 PowerShell，按本机安装路径注册 MCP servers。以下命令将 `deepseek_harness` 和 `doubao_desktop` 写入 Codex 用户配置：
+确认输出包含 `"available": true` 后，配置 Codex MCP servers。以下命令会修改当前 Windows 用户的 Codex MCP 配置：
 
 ```powershell
 $node = (Get-Command node.exe).Source
@@ -82,49 +59,66 @@ codex mcp add doubao_desktop `
   -- $node $gatewayEntry
 ```
 
-将 `DOUBAO_APP` 改为本机豆包程序路径。保存配置后，在 Codex 中重载 MCP servers。启用豆包 CDP 后运行 `npm run check` 检查本机依赖和连接状态；检查不会发送模型请求。
+在 Codex 中重载 MCP servers。DSH 的 headless profile 需要配置可用模型和对应认证；本项目不会读取或复制 DSH、豆包或 Codex 的凭据。
 
-## 豆包 CDP
+## 启动和使用
 
-`npm run setup:doubao` 安装 gateway 及其固定版本的 `doubao-cli` 依赖，不会重启豆包。豆包正在运行时，先保存工作，再按需设置应用路径并启用 CDP：
+每次开机后，先手动启动并登录三个 agent。豆包需已经通过上节命令启用本机 CDP。然后双击 [启动 Agent Team.cmd](./启动%20Agent%20Team.cmd)，或在 PowerShell 运行：
 
 ```powershell
-$env:DOUBAO_APP = 'C:\Path\To\Doubao.exe'
-$env:DOUBAO_DATA_DIR = "$env:LOCALAPPDATA\Doubao\User Data"
-$env:DOUBAO_CLI_ENTRY = (Resolve-Path .\bridges\codex-doubao-desktop-gateway\deps\doubao-cli\bin\doubao.mjs).Path
-$env:DOUBAO_CLI_CONFIG_DIR = (Join-Path (Get-Location) 'bridges\codex-doubao-desktop-gateway\data')
-node $env:DOUBAO_CLI_ENTRY --app doubao cdp launch --yes --json
+npm run start:team
 ```
 
-启用 CDP 会重启豆包。CDP 仅应监听 `127.0.0.1`；不要将调试端口暴露到局域网或公网。Codex MCP 配置通常位于 `%USERPROFILE%\.codex\config.toml`；更新配置后需要在 Codex 中重载 MCP servers。
+启动器会复用已有工作台，或在后台启动 API 并打开 <http://127.0.0.1:4174>；不会启动、重启或控制 agent 客户端。新建任务时，输入一个存在的工作区绝对路径和任务目标。工作区路径初始为空，避免使用开发者电脑的本地路径。
 
-## 架构
+开发模式运行 `npm run dev`，页面位于 <http://127.0.0.1:5173>，API 监听 `127.0.0.1:4174`。也可以运行 `npm run build` 后用 `npm start` 启动生产构建。
 
-- `deepseek_harness`：通过 `dsh-ai-bridge` 的 stdio MCP connector 调用 DSH headless profile。长任务会先返回可继续等待的 `taskId`，再通过短轮询等待，避免上游 MCP 的单次调用超时被误报为 DeepSeek 失败。
-- `doubao_desktop`：通过 Codex Doubao Desktop Gateway 和本机 CDP 控制已登录的豆包桌面端。
-- `AGENTS.md`：Codex 协调、委派和任务验收规则。
-- `team/task-contract.schema.json` 与 `team/tasks/TEMPLATE.md`：任务输入、权限范围、状态和产物格式。
-- `bridges/`：纳入仓库的 bridge 源码，保留各自的上游许可证和第三方声明。
+检查本机程序和配置：
 
-Codex app-server 是协调入口，MCP bridge 将请求转发给 worker。DSH 的原生 Agent Teams 只管理 DSH 自己的进程，不能直接把 Codex 与豆包放入同一 roster，因此本工作台在外层呈现三个运行时。调度由 Codex 的任务回合决定，不会自动开启多个 DSH 窗口。
+```powershell
+npm run check
+```
 
-bridge 源码来自 [dsh-ai-bridge](https://github.com/ganmayou2333/dsh-ai-bridge) 与 [codex-doubao-desktop-gateway](https://github.com/chassychan/codex-doubao-desktop-gateway)。豆包 gateway 包含与本工作台配套的 create-and-wait 调用扩展。各 bridge 目录保留其上游 `LICENSE`；gateway 还附带 `THIRD_PARTY_NOTICES.md`。项目内 Codex、DeepSeek 与豆包名称和标志归其各自权利人所有，不包含在本项目许可授权范围内。
+该检查不发送模型请求，也不会重启应用；它不能证明模型账户授权有效。
 
-## 能力与边界
+## 架构与代码索引
 
-- 工作台逐项显示 Codex 事件以及 DSH、豆包的 MCP 调用和回复；运行状态由 app-server 事件更新。任务时间线支持 Markdown/GFM，并区分用户消息、最终答复和执行过程。
-- 豆包普通新任务和补充任务会在一次 MCP 调用中提交并等待回复。返回 `running`、空回复，或 `unknown` 且标记为 pending 时，表示任务仍未确认完成或取消；继续使用相同的 `conversationId`/`runId` 等待，不要重复提交。超时但仍在运行会显示为“仍在执行”，不代表失败。
-- DSH 返回 `status=running` 与 `taskId` 时，继续用相同的 `taskId` 调用 `dsh_wait`；需要停止时调用 `dsh_cancel`。这让较慢的 DeepSeek 任务可以跨多个短 MCP 调用保持可观察。
-- DSH 和豆包必须已在各自客户端登录并配置好。连接检查不能证明模型授权有效。
-- Codex 完成一轮后，在同一任务中发送补充内容会沿用原 Codex 会话。Agent Team 服务重启后，继续历史任务会把已保存的用户与 Codex 主对话带入新会话；上次仍在运行的回合会标记为中断，不会恢复原来的运行进程。重新选择任务会加载该任务的工作区与写入权限。
-- 团队回复是协作记录，不代表建议或产物已经独立验收；涉及代码时仍应检查实际文件、diff 和验证结果。
+| 路径 | 作用 |
+| --- | --- |
+| [`server/index.mjs`](./server/index.mjs) | 工作台协调服务、Codex app-server 事件、任务状态、计划确认、审批和提问、续接/停止/恢复、邮箱、审计持久化及 HTTP API。 |
+| [`server/codex-app-server.mjs`](./server/codex-app-server.mjs) | 启动并连接 Codex app-server 的 JSON-RPC 客户端。 |
+| [`src/App.jsx`](./src/App.jsx) | React 主界面：任务导航、计划确认、时间线、Markdown/GFM、表单提问、成员检查器、审计和邮箱面板。 |
+| [`src/app.css`](./src/app.css) | 桌面和移动端布局、时间线层级、状态、抽屉、计划和交互卡片样式。 |
+| [`src/main.jsx`](./src/main.jsx) 与 [`src/assets/`](./src/assets/) | 前端入口和三个成员的图标资源。 |
+| [`bridges/dsh-ai-bridge/dsh-mcp-connector/server.mjs`](./bridges/dsh-ai-bridge/dsh-mcp-connector/server.mjs) | DeepSeek MCP connector；处理 `dsh_ask`、`dsh_wait`、`dsh_cancel`、队列和连接状态。 |
+| [`bridges/dsh-ai-bridge/dsh-mcp-connector/selftest.mjs`](./bridges/dsh-ai-bridge/dsh-mcp-connector/selftest.mjs) | DSH connector 的离线及协议自测。 |
+| [`bridges/codex-doubao-desktop-gateway/src/server.mjs`](./bridges/codex-doubao-desktop-gateway/src/server.mjs) | 豆包 MCP 工具：新建/继续会话、等待、停止、状态检查和读取消息。 |
+| [`bridges/codex-doubao-desktop-gateway/patches/doubao-cli-windows.patch`](./bridges/codex-doubao-desktop-gateway/patches/doubao-cli-windows.patch) | 与 Windows 桌面端配套的 CLI 补丁。 |
+| [`team/task-contract.schema.json`](./team/task-contract.schema.json) 与 [`team/tasks/TEMPLATE.md`](./team/tasks/TEMPLATE.md) | 任务合同字段、读写范围、验收、依赖、状态和记录模板。运行任务 JSON 不包含在公开源码中。 |
+| [`scripts/start-agent-team.ps1`](./scripts/start-agent-team.ps1) 与 [`scripts/check-prerequisites.ps1`](./scripts/check-prerequisites.ps1) | 启动本地工作台及检查运行前置条件。 |
 
-运行记录保存在 `data/runs.json`；本地运行数据、依赖和任务记录由 `.gitignore` 排除。
+### 主要 API
 
-## 安全边界
+API 在 [server/index.mjs](./server/index.mjs) 中实现。包括 `POST /api/runs` 新建任务、`GET /api/runs` 与 `GET /api/events` 获取列表和实时事件，以及 `/api/runs/:id` 下的计划、追加指引、暂停恢复、停止、标题更新、成员留言、提问回答、审批、子任务、审计事件和删除接口。API 与豆包 CDP 都只应绑定 loopback；MCP server 使用本机 stdio。
 
-- MCP servers 使用本机 stdio；本机 API 和豆包 CDP 应只绑定 loopback 地址。
-- DSH 与豆包 worker 可访问授予它们的工作区；敏感项目应使用单独 worktree 和最小权限。
-- 豆包 CDP 可访问当前登录会话。停止使用后，应正常退出并重新启动豆包以关闭调试端口。
-- DSH 官方仍标注为 developer preview。运行插件或命令前应检查权限与产物。
-- 本项目不保存模型密钥、豆包会话数据或 DSH 凭据。
+Codex 是外层协调者。DeepSeek Harness 的原生 Agent Teams 只管理 DSH 自己的进程，因此本工作台通过 stdio MCP bridge 将 DSH 和豆包作为外部成员接入，不会把它们伪装成 Codex 的原生 roster。
+
+## 本地数据和安全
+
+- 工作台运行状态保存在 `data/runs.json`，追加审计事件保存在 `data/events/<runId>.jsonl`，成员邮箱保存在 `data/mailbox/`。这些运行数据、依赖目录、豆包 CLI 数据目录和 `.env` 文件由 `.gitignore` 排除。
+- 删除对话会永久删除工作台保存的相应数据；不删除工作区里的文件，也不删除 Codex、DSH 或豆包客户端自己的聊天记录。
+- 默认只使用本机 MCP stdio 和 `127.0.0.1` API。不要将豆包 CDP 端口、工作台 API 或凭据暴露到局域网或公网。
+- 允许工作区写入时，三个 agent 可依分配范围修改所选目录。敏感项目应使用独立工作副本，并逐项检查实际 diff 和产物。
+- 顶层项目采用 MIT 许可证。两个 bridge 保留各自上游许可证；豆包 gateway 另附 [`THIRD_PARTY_NOTICES.md`](./bridges/codex-doubao-desktop-gateway/THIRD_PARTY_NOTICES.md)。产品名称和标志仍归各自权利人所有。
+
+## 验证
+
+```powershell
+npm ci
+npm run build
+npm --prefix .\bridges\dsh-ai-bridge test
+node --check .\server\index.mjs
+node --check .\bridges\codex-doubao-desktop-gateway\src\server.mjs
+```
+
+完整 bridge 测试会运行本地确定性检查；`npm run check` 额外检查当前机器上的 CLI、MCP 配置和豆包 CDP 状态。

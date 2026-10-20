@@ -1,0 +1,42 @@
+; doubao-status.ini —— 豆包状态回报的配置
+;
+; 用法：把它复制到「状态文件所在目录」，去掉 .sample 后缀即生效。
+;       默认位置 = 任务队列同目录（$DSH_HOME/mcp-connector/doubao-status.ini）。
+;       找不到这个文件时，脚本用内置默认值并打印一条告警——不会因为配置问题丢状态。
+;       想换位置：设置环境变量 DOUBAO_STATUS_INI 指向你的文件。
+;
+; 改完立即生效，不需要重启任何东西（脚本每次都重新读）。
+
+[status]
+; 状态写到哪里。留空 = 队列同目录的 status.jsonl
+file =
+
+; 启用哪些状态。写在外面的状态被调用时是**静默 no-op**（退出 0、不输出、不报错），
+; 这样即使关掉某些状态，豆包的工作也不会被打断。
+; received = 派发器在「指令真的发出去」那一刻自己写的发送侧事实（不是豆包的回报）。
+; 关掉它，面板就看不到「刚派发出去」这一秒；started 仍会照常覆盖它。
+enabled = received,started,progress,need_input,done,failed
+
+
+[limits]
+; 单条状态正文上限；超出直接截断（不报错）
+max_message_chars = 500
+
+; 同一个 job 同一状态的两次发送最小间隔（毫秒）。
+; 注意：received / started / done / failed 永不限流——它们是关键节点。
+min_interval_ms = 2000
+
+; progress 单独放宽，避免刷屏
+progress_min_interval_ms = 10000
+
+
+[push]
+; 是否把「阶段转换」推给 DSH 会话。
+; progress 只写文件、不推送（每次推送都是一次真实模型调用）。
+enabled = false
+
+; 哪些状态值得推（只能从这里列出的状态里选）
+targets = started,need_input,done,failed
+
+; 目标 DSH 会话 id。留空 = 还没指定；推送时会明确报错而不是静默丢。
+session =

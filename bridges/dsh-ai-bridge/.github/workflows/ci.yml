@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  selftest:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['20', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # Offline mode skips the two checks that shell out to a local `dsh`
+      # installation, so the protocol surface, the HTTP transport, the task
+      # queue and the dispatcher's verification logic are gated on any machine.
+      - name: Selftests (offline)
+        run: npm test
+
+      - name: Syntax check
+        shell: bash
+        run: |
+          node --check doubao-cdp/cdp.mjs
+          node --check doubao-cdp/dispatch.mjs
+          node --check doubao-cdp/dispatch-selftest.mjs
+          node --check dsh-mcp-connector/queue.mjs
+          node --check scripts/register.mjs
+          node --check scripts/register-selftest.mjs

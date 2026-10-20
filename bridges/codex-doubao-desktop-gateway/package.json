@@ -1,0 +1,17 @@
+{
+  "name": "codex-doubao-desktop-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Experimental local MCP bridge for the Doubao Windows desktop app",
+  "author": "ChassyChan",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "zod": "^3.25.76"
+  }
+}

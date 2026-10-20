@@ -1,0 +1,3 @@
+- insert:
+    - id: doubao-status-panel
+      name: '@local/doubao-status-panel'

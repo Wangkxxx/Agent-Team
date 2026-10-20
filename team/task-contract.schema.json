@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-team.local/schemas/task-contract.schema.json",
+  "title": "Agent Team Task",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "taskId",
+    "goal",
+    "inputs",
+    "owner",
+    "writeScope",
+    "outputContract",
+    "acceptanceChecks",
+    "status",
+    "createdAt"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1, "default": 2 },
+    "taskId": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{1,79}$" },
+    "goal": { "type": "string", "minLength": 1, "maxLength": 10000 },
+    "inputs": { "type": "array", "items": { "type": "string" } },
+    "owner": { "enum": ["codex", "deepseek_harness", "doubao_desktop", "human"] },
+    "writeScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "paths"],
+      "properties": {
+        "mode": { "enum": ["read-only", "exclusive-write"] },
+        "paths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "outputContract": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "acceptanceChecks": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "status": { "enum": ["draft", "ready", "running", "needs_input", "review", "done", "failed", "blocked", "halted"] },
+    "dependencies": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "attempt": { "type": "integer", "minimum": 0, "default": 0 },
+    "attemptId": { "type": ["string", "null"], "default": null },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "sessionId": { "type": ["string", "null"] },
+    "conversationId": { "type": ["string", "null"] },
+    "runId": { "type": ["string", "null"] },
+    "artifacts": { "type": "array", "items": { "type": "string" } },
+    "evidence": { "type": "array", "items": { "type": "string" } },
+    "failureReason": { "type": ["string", "null"] }
+  }
+}

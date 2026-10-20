@@ -1,0 +1,149 @@
+diff --git a/src/app.mjs b/src/app.mjs
+index ab08295..2f4555c 100644
+--- a/src/app.mjs
++++ b/src/app.mjs
+@@ -19,7 +19,9 @@ export function resolveApp(requested, env = process.env, exists = fs.existsSync)
+   const appPath = customPath && (!requested || requested === customVariant) ? customPath : `/Applications/${variant.name}.app`;
+   return {
+     ...variant, id, appPath,
+-    dataDir: env.DOUBAO_DATA_DIR || path.join(os.homedir(), 'Library', 'Application Support', variant.name),
++    dataDir: env.DOUBAO_DATA_DIR || (process.platform === 'win32'
++      ? path.join(env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), variant.name, 'User Data')
++      : path.join(os.homedir(), 'Library', 'Application Support', variant.name)),
+     endpoint: (env.DOUBAO_CDP_ENDPOINT || `http://127.0.0.1:${variant.port}`).replace(/\/$/u, ''),
+   };
+ }
+diff --git a/src/cli.mjs b/src/cli.mjs
+index 0164d32..8f06d05 100644
+--- a/src/cli.mjs
++++ b/src/cli.mjs
+@@ -1,7 +1,7 @@
+ import fs from 'node:fs';
+ import { readUsage, formatUsage } from './usage.mjs';
+ import path from 'node:path';
+-import { spawnSync } from 'node:child_process';
++import { spawn, spawnSync } from 'node:child_process';
+ import { createInterface } from 'node:readline/promises';
+ import { getDataDir, readProfiles, resolveProfile } from './storage.mjs';
+ import { sessionIndex } from './sessions.mjs';
+@@ -471,6 +471,7 @@ function output(value, json) {
+ }
+ 
+ function appVersion(appPath) {
++  if (process.platform === 'win32') return null;
+   const plist = path.join(appPath, 'Contents', 'Info.plist');
+   const result = spawnSync('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', plist], {
+     encoding: 'utf8',
+@@ -485,6 +486,10 @@ function appProcessPattern(appPath) {
+ }
+ 
+ function appRunning(appPath) {
++  if (process.platform === 'win32') {
++    const result = spawnSync('tasklist.exe', ['/FI', `IMAGENAME eq ${path.basename(appPath)}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8' });
++    return result.status === 0 && result.stdout.toLowerCase().includes(`"${path.basename(appPath).toLowerCase()}"`);
++  }
+   return spawnSync('/usr/bin/pgrep', ['-f', appProcessPattern(appPath)]).status === 0;
+ }
+ 
+@@ -498,6 +503,15 @@ async function waitForAppExit(appPath, timeoutMs) {
+ }
+ 
+ async function quitAppForCdp(appPath) {
++  if (process.platform === 'win32') {
++    const result = spawnSync('taskkill.exe', ['/IM', path.basename(appPath), '/T'], { encoding: 'utf8' });
++    if (result.status === 0 && await waitForAppExit(appPath, 10_000)) return;
++    const forced = spawnSync('taskkill.exe', ['/IM', path.basename(appPath), '/T', '/F'], { encoding: 'utf8' });
++    if (forced.status !== 0 || !await waitForAppExit(appPath, 10_000)) {
++      throw new Error('Doubao did not quit. Close it manually, then retry CDP launch.');
++    }
++    return;
++  }
+   const result = spawnSync('/usr/bin/osascript', [
+     '-e',
+     `tell application id ${JSON.stringify(currentApp().bundleId)} to quit`,
+@@ -613,9 +627,13 @@ export async function main(argv) {
+     try { return await run(options); }
+     catch (error) {
+       if (!error.result) throw error;
++      const [command, subcommand] = options.args;
++      const waitPending = ['timeout', 'task_unavailable'].includes(error.code)
++        && command === 'sessions'
++        && (subcommand === 'wait' || options.wait && ['create', 'send'].includes(subcommand));
+       if (app.id === 'web' && options.args[0] === 'login' && !options.json) console.error(`doubao: ${error.message}`);
+-      else output({ ...error.result, error: error.code || 'task_error', message: error.message }, options.json);
+-      process.exitCode = 1;
++      else output({ ...error.result, ...(waitPending ? { pending: true } : {}), error: error.code || 'task_error', message: error.message }, options.json);
++      process.exitCode = waitPending ? 0 : 1;
+     }
+     finally {
+       const notification = await reminder;
+@@ -932,8 +950,13 @@ async function run(options) {
+       await confirmCdpRestart({ json, yes });
+       await quitAppForCdp(appPath);
+     }
+-    const result = spawnSync('/usr/bin/open', ['-a', appPath, '--args', `--remote-debugging-port=${port}`], { encoding: 'utf8' });
+-    if (result.status !== 0) throw new Error(result.stderr.trim() || 'failed to launch Doubao with CDP');
++    if (process.platform === 'win32') {
++      const child = spawn(appPath, [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1'], { detached: true, stdio: 'ignore' });
++      child.unref();
++    } else {
++      const result = spawnSync('/usr/bin/open', ['-a', appPath, '--args', `--remote-debugging-port=${port}`], { encoding: 'utf8' });
++      if (result.status !== 0) throw new Error(result.stderr.trim() || 'failed to launch Doubao with CDP');
++    }
+     let launched = existing;
+     for (let attempt = 0; attempt < 120 && !launched.available; attempt += 1) {
+       await new Promise((resolve) => setTimeout(resolve, 250));
+diff --git a/src/turns.mjs b/src/turns.mjs
+index 8e07251..701a949 100644
+--- a/src/turns.mjs
++++ b/src/turns.mjs
+@@ -226,6 +226,19 @@ const remaining = deadline => ['web', 'headless'].includes(currentApp().id) && d
+   ? Math.min(10000, webRequestBudget(deadline))
+   : Math.max(1, Math.min(10000, deadline ? deadline - Date.now() : 10000));
+ 
++function isRetryableWaitError(error) {
++  const retryableCodes = new Set([
++    'turn_unavailable', 'ETIMEDOUT', 'ECONNRESET', 'ECONNABORTED',
++    'EPIPE', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT',
++    'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET',
++  ]);
++  for (let current = error, depth = 0; current && depth < 4; current = current.cause, depth += 1) {
++    if (retryableCodes.has(current.code) || /^(?:TimeoutError|AbortError)$/u.test(current.name || '')) return true;
++    if (/(?:timeout|timed\s*out|signal timed out|fetch failed|socket hang up|network error|connection reset|connection aborted)/iu.test(current.message || '')) return true;
++  }
++  return false;
++}
++
+ async function conversationMessages(client, conversationId, deadline) {
+   const body = await imRequest(client, 'conversation/batch_get', 1111, 'batch_get_conv_info_uplink_body', {
+     conversation_id: [conversationId], option: { recent_message_count_per_conv: 100 }, ext: {},
+@@ -406,8 +419,8 @@ export async function waitTurn(client, conversationId, options = {}) {
+       if (['completed', 'failed', 'cancelled', 'waiting_input'].includes(snapshot.result.status)) return snapshot.result;
+     } catch (error) {
+       lastError = error;
+-      // An ACK can precede IM persistence. Retry lookups, never the send.
+-      if (error.code !== 'turn_unavailable') break;
++      // A failed status lookup does not prove the Doubao task failed or stopped.
++      if (!isRetryableWaitError(error)) break;
+     }
+     if (Date.now() >= deadline) break;
+     try {
+@@ -422,12 +435,16 @@ export async function waitTurn(client, conversationId, options = {}) {
+           Object.assign(receipt, result); options.onReceipt?.(receipt);
+         } catch (error) {
+           if (error.receipt) { Object.assign(receipt, error.receipt); options.onReceipt?.(receipt); }
+-          if (!['timeout', 'incomplete_stream', 'exception'].includes(error.code)) throw error;
++          if (!['timeout', 'incomplete_stream', 'exception'].includes(error.code) && !isRetryableWaitError(error)) throw error;
+         }
+       } else if (receipt.handoffs?.some(task => !task.completed)) {
+         await followTaskStreams(client, receipt, Math.min(1500, deadline - Date.now()), options.onReceipt);
+       } else await new Promise(resolve => setTimeout(resolve, Math.min(750, deadline - Date.now())));
+-    } catch (error) { lastError = error; break; }
++    } catch (error) {
++      lastError = error;
++      if (!isRetryableWaitError(error)) break;
++      if (Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, Math.min(750, deadline - Date.now())));
++    }
+   } while (Date.now() < deadline);
+   const timedOut = Date.now() >= deadline;
+   const error = new Error(timedOut

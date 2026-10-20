@@ -1,0 +1,16 @@
+{
+  "name": "@local/doubao-status-panel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "豆包控制器（Doubao Controller）：把豆包桌面端接进 DSH Web 侧栏——实时任务状态、模式与模型读数、一键切到工作模式、5h/7d 额度与进度条，读额度与切模式都只用豆包自己的界面入口，服务走 DSH 自己的端口（只读、仅本机） | Doubao Controller: a DSH Web sidebar control panel for the Doubao desktop app - live task status, mode/model readout, one-click switch to work mode, and 5h/7d quota windows with progress bars",
+  "exports": { ".": "./index.js", "./client": "./client.js" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-sidebar"]
+    }
+  }
+}

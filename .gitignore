@@ -1,10 +1,12 @@
 node_modules/
 dist/
+.temp-protocol/
 data/
 artifacts/
 tasks/*.jsonl
 team/tasks/*.json
 bridges/**/node_modules/
+bridges/dsh-ai-bridge/**/.selftest-*
 bridges/codex-doubao-desktop-gateway/deps/
 bridges/codex-doubao-desktop-gateway/data/
 .env*
