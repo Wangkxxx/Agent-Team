@@ -16,11 +16,13 @@
   "dependencies": {
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
     "@deepseek-ai/dsh": "0.2.0-rc.2",
+    "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "vite": "^6.0.5"
   }

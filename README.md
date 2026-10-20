@@ -43,7 +43,13 @@ node $env:DOUBAO_CLI_ENTRY --app doubao cdp launch --yes --json
 
 确认结果包含 `"available": true` 后，再双击“启动 Agent Team.cmd”。如果豆包已经打开但没有 CDP 端口，该命令会重启豆包；先保存未发送的内容。也可以运行 `npm run check` 确认本机连接状态。
 
-运行时在工作台填写一个存在的本机工作区绝对路径和任务目标。新任务默认允许 Codex 修改所选工作区；关闭“允许修改工作区”可改为只读。Codex 的高风险命令、工作区外访问和未识别操作仍需确认。
+运行时在工作台填写一个存在的本机工作区绝对路径和任务目标。新任务默认允许 Codex、DeepSeek 和豆包在所选工作区内按分配范围修改文件；关闭“允许修改工作区”可切换为只读。Codex 的高风险命令、工作区外访问和未识别操作仍需确认。
+
+任务标题可通过标题栏的铅笔按钮修改。Codex、DeepSeek 和豆包的消息会按“你的消息”“最终答复”和“执行过程”区分，执行过程默认用较低的视觉优先级显示；Codex 和 worker 返回的 Markdown 与 GFM 表格会直接渲染，原始内容仍可展开查看。
+
+任务执行期间可以继续在底部输入框追加指引。工作台会把指引发送到当前 Codex 回合，DeepSeek 与豆包继续各自的后台工作；Codex 会根据新指引决定是否需要停止或改派成员。标题栏的“停止任务”会中断 Codex，并向本轮记录中的 DeepSeek 和豆包任务发送停止请求，已经完成的文件修改不会撤销。
+
+如果 Codex 需要用户决定，它可以显示带选项的提问卡；选项之外的要求可以写入补充说明，提交后会回传到等待中的回合。
 
 开发模式：
 
@@ -94,7 +100,7 @@ node $env:DOUBAO_CLI_ENTRY --app doubao cdp launch --yes --json
 
 ## 架构
 
-- `deepseek_harness`：通过 `dsh-ai-bridge` 的 stdio MCP connector 调用 DSH headless profile。
+- `deepseek_harness`：通过 `dsh-ai-bridge` 的 stdio MCP connector 调用 DSH headless profile。长任务会先返回可继续等待的 `taskId`，再通过短轮询等待，避免上游 MCP 的单次调用超时被误报为 DeepSeek 失败。
 - `doubao_desktop`：通过 Codex Doubao Desktop Gateway 和本机 CDP 控制已登录的豆包桌面端。
 - `AGENTS.md`：Codex 协调、委派和任务验收规则。
 - `team/task-contract.schema.json` 与 `team/tasks/TEMPLATE.md`：任务输入、权限范围、状态和产物格式。
@@ -106,8 +112,9 @@ bridge 源码来自 [dsh-ai-bridge](https://github.com/ganmayou2333/dsh-ai-bridg
 
 ## 能力与边界
 
-- 工作台逐项显示 Codex 事件以及 DSH、豆包的 MCP 调用和回复；运行状态由 app-server 事件更新。
-- 豆包普通新任务和补充任务会在一次 MCP 调用中提交并等待回复。超时但仍在运行会显示为“仍在执行”，不代表失败。
+- 工作台逐项显示 Codex 事件以及 DSH、豆包的 MCP 调用和回复；运行状态由 app-server 事件更新。任务时间线支持 Markdown/GFM，并区分用户消息、最终答复和执行过程。
+- 豆包普通新任务和补充任务会在一次 MCP 调用中提交并等待回复。返回 `running`、空回复，或 `unknown` 且标记为 pending 时，表示任务仍未确认完成或取消；继续使用相同的 `conversationId`/`runId` 等待，不要重复提交。超时但仍在运行会显示为“仍在执行”，不代表失败。
+- DSH 返回 `status=running` 与 `taskId` 时，继续用相同的 `taskId` 调用 `dsh_wait`；需要停止时调用 `dsh_cancel`。这让较慢的 DeepSeek 任务可以跨多个短 MCP 调用保持可观察。
 - DSH 和豆包必须已在各自客户端登录并配置好。连接检查不能证明模型授权有效。
 - Codex 完成一轮后，在同一任务中发送补充内容会沿用原 Codex 会话。Agent Team 服务重启后，继续历史任务会把已保存的用户与 Codex 主对话带入新会话；上次仍在运行的回合会标记为中断，不会恢复原来的运行进程。重新选择任务会加载该任务的工作区与写入权限。
 - 团队回复是协作记录，不代表建议或产物已经独立验收；涉及代码时仍应检查实际文件、diff 和验证结果。
