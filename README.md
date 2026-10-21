@@ -72,7 +72,7 @@ codex mcp add doubao_desktop `
 
 ## 启动和使用
 
-每次开机后，先手动启动并登录三个 agent。豆包需已经通过上节命令启用本机 CDP。然后双击 [启动 Agent Team.cmd](./启动%20Agent%20Team.cmd)，或在 PowerShell 运行：
+每次开机后，豆包需已经通过上节命令启用本机 CDP。**Codex 和 DSH 不需要启动**。然后双击 [启动 Agent Team.cmd](./启动%20Agent%20Team.cmd)，或在 PowerShell 运行：
 
 ```powershell
 npm run start:team
