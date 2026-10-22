@@ -9,9 +9,11 @@
     "web:dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "start": "node server/index.mjs",
-    "start:team": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-agent-team.ps1",
-    "check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-prerequisites.ps1",
-    "setup:doubao": "powershell -NoProfile -ExecutionPolicy Bypass -File ./bridges/codex-doubao-desktop-gateway/scripts/install-windows.ps1"
+    "start:team": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-agent-team.ps1",
+    "check": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-prerequisites.ps1",
+    "setup:doubao": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./bridges/codex-doubao-desktop-gateway/scripts/install-windows.ps1",
+    "test": "node --test tests/*.test.mjs",
+    "setup:shortcut": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/create-shortcut.ps1"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
