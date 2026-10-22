@@ -33,6 +33,7 @@ import doubaoLogo from './assets/doubao.png'
 
 const DEFAULT_WORKSPACE = ''
 const ACTIVE_STATES = new Set(['staged', 'starting', 'running', 'waiting_approval', 'waiting_input', 'halted'])
+const ACTIVE_TURN_STATES = new Set(['starting', 'running', 'waiting_approval', 'waiting_input'])
 const STOPPABLE_STATES = new Set(['starting', 'running', 'waiting_approval', 'waiting_input'])
 const NEW_DRAFT_KEY = 'new'
 const MARKDOWN_PLUGINS = [remarkGfm]
@@ -459,6 +460,7 @@ function App() {
     return saved === 'read-only' ? 'read-only' : 'workspace-write'
   })
   const [fullAccessConfirmed, setFullAccessConfirmed] = useState(false)
+  const [permissionBusy, setPermissionBusy] = useState(false)
   const allowWrites = permissionMode !== 'read-only'
   const [busy, setBusy] = useState(false)
   const [pendingApprovals, setPendingApprovals] = useState({})
@@ -489,6 +491,11 @@ function App() {
 
   const selectedRun = useMemo(() => runs.find(run => run.id === activeRunId) || null, [runs, activeRunId])
   const isRunActive = ACTIVE_STATES.has(selectedRun?.status)
+  const permissionDirty = Boolean(selectedRun && permissionMode !== selectedRun.permissionMode)
+  const permissionPending = Boolean(selectedRun
+    && ACTIVE_TURN_STATES.has(selectedRun.status)
+    && selectedRun.activeTurnPermissionMode
+    && selectedRun.activeTurnPermissionMode !== selectedRun.permissionMode)
   const draftKey = activeRunId || NEW_DRAFT_KEY
   const prompt = drafts[draftKey] || ''
   const setPrompt = value => setDrafts(previous => ({ ...previous, [draftKey]: value }))
@@ -574,7 +581,7 @@ function App() {
     setWorkspace(selectedRun.workspace)
     setPermissionMode(selectedRun.permissionMode || (selectedRun.allowWrites ? 'workspace-write' : 'read-only'))
     setFullAccessConfirmed(false)
-  }, [selectedRun?.id])
+  }, [selectedRun?.id, selectedRun?.permissionMode])
 
   useEffect(() => {
     shouldAutoScrollRef.current = true
@@ -631,7 +638,8 @@ function App() {
   const submitPrompt = async event => {
     event.preventDefault()
     const text = prompt.trim()
-    if (!text || busy || (!selectedRun && permissionMode === 'full-access' && !fullAccessConfirmed)) return
+    if (!text || busy || permissionBusy || permissionDirty || permissionPending
+      || (!selectedRun && permissionMode === 'full-access' && !fullAccessConfirmed)) return
     setBusy(true)
     setError('')
     try {
@@ -639,13 +647,15 @@ function App() {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: text,
-          workspace,
-          permissionMode,
-          allowWrites,
-          confirmFullAccess: !selectedRun && permissionMode === 'full-access' && fullAccessConfirmed,
-        }),
+        body: JSON.stringify(selectedRun
+          ? { prompt: text }
+          : {
+              prompt: text,
+              workspace,
+              permissionMode,
+              allowWrites,
+              confirmFullAccess: permissionMode === 'full-access' && fullAccessConfirmed,
+            }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || '任务没有提交成功。')
@@ -656,6 +666,30 @@ function App() {
       setError(`任务提交失败：${requestError.message}`)
     } finally {
       setBusy(false)
+    }
+  }
+
+  const applyPermission = async () => {
+    if (!selectedRun || !permissionDirty || permissionBusy
+      || (permissionMode === 'full-access' && !fullAccessConfirmed)) return
+    setPermissionBusy(true)
+    setError('')
+    try {
+      const response = await fetch(`/api/runs/${selectedRun.id}/permission`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          permissionMode,
+          confirmFullAccess: permissionMode === 'full-access' && fullAccessConfirmed,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '执行权限没有更新。')
+      upsertRun(data)
+    } catch (requestError) {
+      setError(`执行权限更新失败：${requestError.message}`)
+    } finally {
+      setPermissionBusy(false)
     }
   }
 
@@ -1048,28 +1082,44 @@ function App() {
                 <span>工作区</span>
                 <input value={workspace} onChange={event => setWorkspace(event.target.value)} aria-label="工作区路径" spellCheck="false" placeholder="C:\\Projects\\my-app" disabled={Boolean(selectedRun)} />
               </label>
-              <fieldset className="permission-picker" disabled={Boolean(selectedRun)}>
-                <legend>执行权限</legend>
-                <div className="permission-options" role="radiogroup" aria-label="选择本轮执行权限">
-                  <label className={permissionMode === 'read-only' ? 'selected' : ''}>
-                    <input type="radio" name="permission-mode" value="read-only" checked={permissionMode === 'read-only'} onChange={() => { setPermissionMode('read-only'); setFullAccessConfirmed(false) }} />
-                    <span>只读</span>
-                  </label>
-                  <label className={permissionMode === 'workspace-write' ? 'selected' : ''}>
-                    <input type="radio" name="permission-mode" value="workspace-write" checked={permissionMode === 'workspace-write'} onChange={() => { setPermissionMode('workspace-write'); setFullAccessConfirmed(false) }} />
-                    <span>工作区写入</span>
-                  </label>
-                  <label className={permissionMode === 'full-access' ? 'selected full-access-option' : ''}>
-                    <input type="radio" name="permission-mode" value="full-access" checked={permissionMode === 'full-access'} onChange={() => { setPermissionMode('full-access'); setFullAccessConfirmed(false) }} />
-                    <span>完全权限</span>
-                  </label>
-                </div>
-              </fieldset>
+              <div className="permission-controls">
+                <fieldset className="permission-picker" disabled={permissionBusy}>
+                  <legend>执行权限</legend>
+                  <div className="permission-options" role="radiogroup" aria-label={selectedRun ? '选择此对话后续回合的执行权限' : '选择本轮执行权限'}>
+                    <label className={permissionMode === 'read-only' ? 'selected' : ''}>
+                      <input type="radio" name="permission-mode" value="read-only" checked={permissionMode === 'read-only'} onChange={() => { setPermissionMode('read-only'); setFullAccessConfirmed(false) }} />
+                      <span>只读</span>
+                    </label>
+                    <label className={permissionMode === 'workspace-write' ? 'selected' : ''}>
+                      <input type="radio" name="permission-mode" value="workspace-write" checked={permissionMode === 'workspace-write'} onChange={() => { setPermissionMode('workspace-write'); setFullAccessConfirmed(false) }} />
+                      <span>工作区写入</span>
+                    </label>
+                    <label className={permissionMode === 'full-access' ? 'selected full-access-option' : ''}>
+                      <input type="radio" name="permission-mode" value="full-access" checked={permissionMode === 'full-access'} onChange={() => { setPermissionMode('full-access'); setFullAccessConfirmed(false) }} />
+                      <span>完全权限</span>
+                    </label>
+                  </div>
+                </fieldset>
+                {selectedRun && permissionDirty && (
+                  <button type="button" className="apply-permission-button" onClick={applyPermission} disabled={permissionBusy || (permissionMode === 'full-access' && !fullAccessConfirmed)}>
+                    {permissionBusy ? <LoaderCircle size={14} className="spin" /> : <ShieldCheck size={14} />}
+                    <span>{permissionBusy ? '应用中' : '应用权限'}</span>
+                  </button>
+                )}
+              </div>
             </div>
-            {!selectedRun && permissionMode === 'full-access' && (
+            {selectedRun && permissionDirty && (
+              <p className="permission-hint">选择后点击“应用权限”。新设置从当前回合结束后的下一回合开始生效，并应用于该回合新派发的成员任务。</p>
+            )}
+            {permissionPending && (
+              <p className="permission-hint permission-hint-pending" role="status">
+                当前回合仍按“{selectedRun.activeTurnPermissionMode === 'full-access' ? '完全权限' : selectedRun.activeTurnPermissionMode === 'read-only' ? '只读' : '工作区写入'}”执行；等本轮结束后，新的“{selectedRun.permissionMode === 'full-access' ? '完全权限' : selectedRun.permissionMode === 'read-only' ? '只读' : '工作区写入'}”才会生效。当前回合结束前暂不能追加任务指引。
+              </p>
+            )}
+            {(!selectedRun || permissionDirty) && permissionMode === 'full-access' && (
               <label className="full-access-confirm">
-                <input type="checkbox" checked={fullAccessConfirmed} onChange={event => setFullAccessConfirmed(event.target.checked)} />
-                <span>我确认本轮成员可访问并修改当前用户有权访问的任意位置，常规操作不再请求审批。</span>
+                <input type="checkbox" checked={fullAccessConfirmed} disabled={permissionBusy} onChange={event => setFullAccessConfirmed(event.target.checked)} />
+                <span>{selectedRun ? '我确认这条对话后续回合中的成员可访问并修改当前用户有权访问的任意位置，常规操作不再请求审批。' : '我确认本轮成员可访问并修改当前用户有权访问的任意位置，常规操作不再请求审批。'}</span>
               </label>
             )}
             <div className="composer-input-row">
@@ -1089,12 +1139,12 @@ function App() {
                 disabled={busy}
                 aria-label="任务内容"
               />
-              <button type="submit" className="send-button" disabled={!prompt.trim() || busy || !workspace.trim() || (!selectedRun && permissionMode === 'full-access' && !fullAccessConfirmed)} aria-label={selectedRun ? (isRunActive ? '追加任务指引' : '发送补充内容') : '开始团队任务'} title={selectedRun ? (isRunActive ? '向当前任务追加指引' : '发送补充内容') : '开始协作'}>
+              <button type="submit" className="send-button" disabled={!prompt.trim() || busy || permissionBusy || permissionDirty || permissionPending || !workspace.trim() || (!selectedRun && permissionMode === 'full-access' && !fullAccessConfirmed)} aria-label={selectedRun ? (isRunActive ? '追加任务指引' : '发送补充内容') : '开始团队任务'} title={permissionPending ? '等待当前回合结束后再发送指引' : permissionDirty ? '先应用执行权限' : selectedRun ? (isRunActive ? '追加任务指引' : '发送补充内容') : '开始协作'}>
                 {busy ? <LoaderCircle size={18} className="spin" /> : <ArrowUp size={18} />}
               </button>
             </div>
             <div className="composer-footnote">
-              <span>{permissionMode === 'full-access' ? '完全权限 · 本机当前用户可访问的文件和操作均不受工作区限制。' : allowWrites ? '工作区写入 · 三名成员可在所选工作区按分配范围修改文件。' : '只读模式 · 团队不会修改文件。'}</span>
+              <span>{permissionDirty ? `待应用：${permissionMode === 'full-access' ? '完全权限' : permissionMode === 'read-only' ? '只读' : '工作区写入'}` : permissionPending ? `后续回合：${selectedRun.permissionMode === 'full-access' ? '完全权限' : selectedRun.permissionMode === 'read-only' ? '只读' : '工作区写入'}` : permissionMode === 'full-access' ? '完全权限 · 本机当前用户可访问的文件和操作均不受工作区限制。' : allowWrites ? '工作区写入 · 三名成员可在所选工作区按分配范围修改文件。' : '只读模式 · 团队不会修改文件。'}</span>
               <span><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行 · {prompt.length.toLocaleString()} / 30,000</span>
             </div>
           </form>

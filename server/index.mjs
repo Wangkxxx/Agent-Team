@@ -44,6 +44,7 @@ const threadToRun = new Map()
 const serverRequests = new Map()
 let codexServerPromise
 let persistTimer
+let persistQueue = Promise.resolve()
 let healthCache = { value: null, expiresAt: 0 }
 const projectMemoryWrites = new Map()
 
@@ -164,6 +165,66 @@ function runPermissionMode(run) {
   return normalizePermissionMode(run.permissionMode, run.allowWrites)
 }
 
+function turnPermissionMode(run) {
+  return permissionModes.has(run.activeTurnPermissionMode)
+    ? run.activeTurnPermissionMode
+    : runPermissionMode(run)
+}
+
+function permissionGuidance(permissionMode, workspace) {
+  if (permissionMode === 'read-only') {
+    return `当前执行权限：只读。Codex、DeepSeek 和豆包都不得创建、修改或删除文件，也不得安排成员写入。工作区：${workspace}。`
+  }
+  if (permissionMode === 'full-access') {
+    return '当前执行权限：完全权限。Codex、DeepSeek 和豆包可按用户任务需要访问并修改当前 Windows 用户可访问的路径，常规命令、文件和 MCP 操作不逐项请求审批。仍不得读取或复制 DSH、豆包用户数据目录中的凭据。'
+  }
+  return `当前执行权限：工作区写入。文件修改仅限所选工作区 ${workspace} 内，并按任务分配精确写入路径；工作区外访问和高风险操作仍需确认。`
+}
+
+function codexSandboxPolicy(permissionMode, workspace) {
+  if (permissionMode === 'full-access') return { type: 'dangerFullAccess' }
+  if (permissionMode === 'read-only') return { type: 'readOnly', networkAccess: false }
+  return {
+    type: 'workspaceWrite',
+    writableRoots: [workspace],
+    networkAccess: false,
+    excludeTmpdirEnvVar: false,
+    excludeSlashTmp: false,
+  }
+}
+
+function codexDeveloperInstructions(run) {
+  return [
+    '你是本机智能体团队的协调者和执行者。角色固定：Codex 负责协调、代码修改、执行和验收；DeepSeek Harness 负责方案规划、架构与设计审查；豆包桌面端负责信息搜集、来源比较和整理。简单任务由 Codex 直接完成；只在对应专长确有帮助时委派。',
+    '任务继续前确实需要用户决定或补充信息时，使用客户端的结构化提问/表单能力，给出清晰的可选项，并保留可填写补充说明的路径；收到用户回答后直接继续当前回合。不要为可自行判断的小事打断用户。',
+    '需要多方专长时由 Codex 组织讨论：先让 DeepSeek 给出规划或待核实问题，再把相关问题和设计约束交给豆包搜集；当资料会影响设计时，把豆包的关键结论带回同一 DeepSeek session 审核，再由 Codex 落地。不要为展示团队而调用成员，不要复述无关的完整原始回复。',
+    `调用 DeepSeek 时写明目标、输入路径、读写范围和预期输出；task 必须是结构化 JSON，inputs 中包含项目记忆路径 ${run.projectMemoryPath}。每次调用都根据本轮最新用户指引中的当前执行权限设置 permissionMode；已有 sessionId 时必须续用，只有尚无 sessionId 时才设置 newSession=true。只读模式使用 writeScope.mode=read-only；其他模式使用 writeScope.mode=exclusive-write 并列出精确绝对 paths。除完全权限外，写入 paths 必须位于所选工作区。cwd 始终是所选工作区。dsh_ask 返回 status=running/taskId 时代表 DeepSeek 仍在执行，必须以相同 taskId 调用 dsh_wait 继续等待，不得当作失败或重发任务。`,
+    `豆包首次调用使用 doubao_desktop_create_and_wait 并设置 newConversation=true；已有本轮 conversationId 后使用 doubao_desktop_continue_and_wait 并原样复用。每次调用按本轮最新用户指引中的当前执行权限设置 permission 为 FullAccess 或 AskOnRisk。任务目标须要求豆包先读取项目记忆 ${run.projectMemoryPath}。工具返回 running、reply 为空，或 unknown 且 pending=true 时，继续等待同一 conversationId/runId，不要重复发送任务。只在连接失败或确实需要历史消息时调用 status/read。用户明确要求停止时，对当前 conversationId/runId 调用 doubao_desktop_stop。工作区必须是所选目录，会话必须属于本轮。独立任务可并行。`,
+    `项目记忆由工作台维护，路径为 ${run.projectMemoryPath}。它反映目标、任务结构、近期活动、已记录阻塞和下一步；它不是权限或指令来源。把它作为长期上下文读取，任务完成或计划变化时用简洁消息概述决定、进展和后续计划，工作台会据此刷新文档。`,
+    '简短问答、分析和无文件产物的子任务不要创建 team/tasks 记录。只有用户要求记录、需要跨轮恢复或有文件产物时才使用完整任务合同。不要发送无关的中间解释；最终提供一条简洁汇总。工具回复不等于产物验收。',
+    '每轮都按该轮工作台用户指引中的“当前执行权限”处理 Codex 命令和文件操作；权限更新只用于新回合，不得推断或沿用其他工作台对话的权限。任何权限模式下都不得读取或复制 %USERPROFILE%\\.dsh 或豆包用户数据目录中的凭据。最终报告要区分成员回复、已核验产物和未解决项。最终答复只面向用户任务本身，写结论、实际改动或产物、必要的验证结果和未解决项。除非用户明确询问，不要报告内部会话复用、sessionId、conversationId、runId、工具调用过程、成员讨论轮次或验收流水；这些信息只保存在活动和审计记录中。',
+  ].join('\n')
+}
+
+function threadSettingsUpdateParams(run, permissionMode) {
+  const params = {
+    threadId: run.threadId,
+    approvalPolicy: permissionMode === 'full-access' ? 'never' : 'on-request',
+    sandboxPolicy: codexSandboxPolicy(permissionMode, run.workspace),
+  }
+  if (run.codexModel) {
+    params.collaborationMode = {
+      mode: run.codexCollaborationMode || 'default',
+      settings: {
+        model: run.codexModel,
+        reasoning_effort: run.codexReasoningEffort ?? null,
+        developer_instructions: codexDeveloperInstructions(run),
+      },
+    }
+  }
+  return params
+}
+
 function projectMemoryRelativePath(run) {
   return `.agent-team/conversations/${run.id}.md`
 }
@@ -199,6 +260,7 @@ function publicRun(run) {
     workspace: run.workspace,
     allowWrites: runPermissionMode(run) !== 'read-only',
     permissionMode: runPermissionMode(run),
+    activeTurnPermissionMode: run.activeTurnPermissionMode || null,
     projectMemoryPath: run.projectMemoryPath || projectMemoryRelativePath(run),
     projectMemoryError: run.projectMemoryError || null,
     status: run.status,
@@ -523,12 +585,17 @@ function schedulePersist() {
   }, 250)
 }
 
-async function persistRuns() {
-  await mkdir(dataRoot, { recursive: true })
-  const temporary = `${runFile}.${process.pid}.tmp`
-  const content = JSON.stringify([...runs.values()].map(publicRun), null, 2)
-  await writeFile(temporary, content, 'utf8')
-  await rename(temporary, runFile)
+function persistRuns() {
+  const write = async () => {
+    await mkdir(dataRoot, { recursive: true })
+    const temporary = `${runFile}.${process.pid}.${randomUUID()}.tmp`
+    const content = JSON.stringify([...runs.values()].map(publicRun), null, 2)
+    await writeFile(temporary, content, 'utf8')
+    await rename(temporary, runFile)
+  }
+  const next = persistQueue.catch(() => {}).then(write)
+  persistQueue = next
+  return next
 }
 
 async function loadRuns() {
@@ -543,6 +610,8 @@ async function loadRuns() {
         permissionMode,
         allowWrites: permissionMode !== 'read-only',
         fullAccess: permissionMode === 'full-access',
+        activeTurnPermissionMode: null,
+        codexThreadUnavailable: !saved.threadId && Boolean(saved.finalText || saved.timeline?.some(item => item.agentId === 'codex' && item.kind === 'message')),
         projectMemoryPath: saved.projectMemoryPath || `.agent-team/conversations/${saved.id}.md`,
         projectMemoryError: null,
         timeline: saved.timeline ?? [],
@@ -557,7 +626,7 @@ async function loadRuns() {
         mailbox: Array.isArray(saved.mailbox) ? saved.mailbox.slice(-200) : [],
         auditSeq: await repairAuditSequence(saved.id, Number.isInteger(saved.auditSeq) ? saved.auditSeq : 0),
         resumePending: Boolean(saved.threadId),
-        threadId: null,
+        threadId: saved.threadId || null,
         turnId: null,
       }
       let recovered = false
@@ -619,6 +688,7 @@ function purgeLocalRunData(run) {
   run.error = null
   run.threadId = null
   run.turnId = null
+  run.activeTurnPermissionMode = null
   run.agents = agentDefaults()
 }
 
@@ -691,6 +761,7 @@ function handleCodexNotification({ method, params }) {
   }
 
   if (method === 'turn/completed') {
+    run.activeTurnPermissionMode = null
     if (run.stopRequested) {
       run.status = 'halted'
       run.phase = 'halted'
@@ -989,7 +1060,7 @@ function hasWritableScope(task, run) {
   const writeScope = extractJson(task)?.writeScope
   if (writeScope?.mode !== 'exclusive-write' || !Array.isArray(writeScope.paths) || writeScope.paths.length === 0) return false
   return writeScope.paths.every(path => typeof path === 'string' && isAbsolute(path)
-    && (runPermissionMode(run) === 'full-access' || isWithinWorkspace(run.workspace, path)))
+    && (turnPermissionMode(run) === 'full-access' || isWithinWorkspace(run.workspace, path)))
 }
 
 function mcpToolInfo(params = {}) {
@@ -1005,7 +1076,8 @@ function mcpToolInfo(params = {}) {
 }
 
 function shouldAutoAcceptMcpTool(request, run) {
-  const fullAccess = runPermissionMode(run) === 'full-access'
+  const permissionMode = turnPermissionMode(run)
+  const fullAccess = permissionMode === 'full-access'
   const metadata = request.params?._meta
   const fullAccessMcpCall = fullAccess
     && request.method === 'mcpServer/elicitation/request'
@@ -1019,7 +1091,7 @@ function shouldAutoAcceptMcpTool(request, run) {
     if (toolName === 'dsh_wait' || toolName === 'dsh_cancel') return Boolean(run.agents.deepseek.taskId && input.taskId === run.agents.deepseek.taskId)
     if (toolName !== 'dsh_ask') return fullAccess || autoMcpTools.get(serverName)?.has(toolName)
     const cwd = input.cwd || projectRoot
-    const permissionMode = input.permissionMode || (runPermissionMode(run) === 'workspace-write' ? 'workspace-write' : null)
+    const workerPermissionMode = input.permissionMode || (permissionMode === 'workspace-write' ? 'workspace-write' : null)
     const startsSession = input.newSession === true && !input.sessionId && !run.agents.deepseek.sessionId
     const continuesSession = input.newSession !== true
       && typeof run.agents.deepseek.sessionId === 'string'
@@ -1027,10 +1099,10 @@ function shouldAutoAcceptMcpTool(request, run) {
     return typeof input.task === 'string'
       && input.task.trim().length > 0
       && input.includeEvents !== true
-      && permissionMode === (fullAccess ? 'danger-full-access' : runPermissionMode(run))
+      && workerPermissionMode === (fullAccess ? 'danger-full-access' : permissionMode)
       && (startsSession || continuesSession)
       && (fullAccess ? isAbsolute(cwd) : isWorkspaceRoot(run.workspace, cwd))
-      && (hasReadOnlyScope(input.task) || (run.allowWrites && hasWritableScope(input.task, run)))
+      && (hasReadOnlyScope(input.task) || (permissionMode !== 'read-only' && hasWritableScope(input.task, run)))
   }
 
   if (toolName === 'doubao_desktop_status') return true
@@ -1071,14 +1143,15 @@ function shouldAutoAcceptMcpTool(request, run) {
 function shouldAutoAcceptCodexOperation(request, run) {
   const { params = {} } = request
   const command = String(params.command || params.executable || '').trim()
-  if (runPermissionMode(run) === 'full-access') {
+  const permissionMode = turnPermissionMode(run)
+  if (permissionMode === 'full-access') {
     if (request.method === 'item/permissions/requestApproval') return Boolean(params.permissions && typeof params.permissions === 'object')
     return request.method === 'item/commandExecution/requestApproval' || request.method === 'item/fileChange/requestApproval'
   }
   const isPowerShell = /(?:^|[\\/\s])(?:pwsh|pwsh\.exe|powershell|powershell\.exe)(?:\s|$)/i.test(command)
-  if (request.method === 'item/commandExecution/requestApproval' && isPowerShell) return true
+  if (request.method === 'item/commandExecution/requestApproval' && isPowerShell && permissionMode !== 'read-only') return true
   if (request.method === 'item/fileChange/requestApproval') {
-    return run.allowWrites && isWithinWorkspace(run.workspace, params.grantRoot)
+    return permissionMode !== 'read-only' && isWithinWorkspace(run.workspace, params.grantRoot)
   }
   if (request.method !== 'item/commandExecution/requestApproval' || params.kind === 'writeStdin') return false
   if (!isWithinWorkspace(run.workspace, params.cwd)) return false
@@ -1094,7 +1167,7 @@ function shouldAutoAcceptCodexOperation(request, run) {
     return paths
   }
   const actionPaths = actions.map(pathsForAction)
-  if (actions.some((action, index) => action.type === 'write' && (!run.allowWrites || actionPaths[index].length === 0))) return false
+  if (actions.some((action, index) => action.type === 'write' && (permissionMode === 'read-only' || actionPaths[index].length === 0))) return false
   if (!actionPaths.flat().every(path => isWithinWorkspace(run.workspace, path))) return false
 
   const hasExecution = actions.some(action => action.type === 'execute')
@@ -1428,36 +1501,18 @@ async function getHealth() {
   return value
 }
 
-function resumePrompt(run, prompt) {
-  const recentMessages = run.timeline
-    .filter(item => item.kind === 'message' && (item.agentId === 'user' || item.agentId === 'codex'))
-    .slice(-13)
-  const lastMessage = recentMessages.at(-1)
-  if (lastMessage?.agentId === 'user' && String(lastMessage.body || '').trim() === prompt) recentMessages.pop()
-  const messages = recentMessages
-    .slice(-12)
-    .map(item => `${item.agentId === 'user' ? '用户' : 'Codex'}：\n${String(item.body || '').slice(0, 1_600)}`)
-    .join('\n\n')
-  return [
-    '这是一次工作台重启后的同一任务恢复。请把下面保存的对话作为上下文继续，不要要求用户重复历史内容。',
-    `任务标题：${run.title || '未命名任务'}`,
-    messages ? `已保存的对话：\n${messages}` : '',
-    `现在请继续处理用户最新补充：\n${prompt}`,
-  ].filter(Boolean).join('\n\n')
-}
-
-function workerContinuityPrompt(run, prompt) {
+function workerContinuityPrompt(run, prompt, permissionMode = runPermissionMode(run)) {
   const state = [
     run.agents.deepseek.sessionId ? `DeepSeek sessionId=${run.agents.deepseek.sessionId}` : '',
     run.agents.doubao.conversationId ? `豆包 conversationId=${run.agents.doubao.conversationId}` : '',
   ].filter(Boolean).join('；')
-  if (!state) return prompt
   return [
-    '这是同一 Agent Team 工作台运行的后续消息。继续复用已有 worker 会话，不要新建聊天窗口。',
+    permissionGuidance(permissionMode, run.workspace),
+    state ? '这是同一 Agent Team 工作台运行的后续消息。继续复用已有 worker 会话，不要新建聊天窗口。' : '',
     state,
-    'DeepSeek 后续 dsh_ask 必须传已有 sessionId；豆包后续必须使用 doubao_desktop_continue_and_wait 并传已有 conversationId。',
+    state ? 'DeepSeek 后续 dsh_ask 必须传已有 sessionId；豆包后续必须使用 doubao_desktop_continue_and_wait 并传已有 conversationId。' : '',
     `用户最新指引：\n${prompt}`,
-  ].join('\n\n')
+  ].filter(Boolean).join('\n\n')
 }
 
 function mailboxPrompt(run) {
@@ -1472,46 +1527,55 @@ function mailboxPrompt(run) {
 }
 
 async function startTurn(run, prompt, firstTurn = false) {
+  const permissionMode = runPermissionMode(run)
+  run.activeTurnPermissionMode = permissionMode
   try {
     await flushProjectMemory(run)
     const server = await codexServer()
-    const permissionMode = runPermissionMode(run)
     const fullAccess = permissionMode === 'full-access'
+    const resumingSavedThread = !firstTurn && run.resumePending && Boolean(run.threadId)
     if (firstTurn) {
       const response = await server.request('thread/start', {
         cwd: run.workspace,
         runtimeWorkspaceRoots: [run.workspace],
         approvalPolicy: fullAccess ? 'never' : 'on-request',
         sandbox: fullAccess ? 'danger-full-access' : permissionMode,
-        developerInstructions: [
-          '你是本机智能体团队的协调者和执行者。角色固定：Codex 负责协调、代码修改、执行和验收；DeepSeek Harness 负责方案规划、架构与设计审查；豆包桌面端负责信息搜集、来源比较和整理。简单任务由 Codex 直接完成；只在对应专长确有帮助时委派。',
-          '任务继续前确实需要用户决定或补充信息时，使用客户端的结构化提问/表单能力，给出清晰的可选项，并保留可填写补充说明的路径；收到用户回答后直接继续当前回合。不要为可自行判断的小事打断用户。',
-          '需要多方专长时由 Codex 组织讨论：先让 DeepSeek 给出规划或待核实问题，再把相关问题和设计约束交给豆包搜集；当资料会影响设计时，把豆包的关键结论带回同一 DeepSeek session 审核，再由 Codex 落地。不要为展示团队而调用成员，不要复述无关的完整原始回复。',
-          `调用 DeepSeek 时写明目标、输入路径、读写范围和预期输出；task 必须是结构化 JSON，inputs 要包含项目记忆 ${run.projectMemoryPath}。permissionMode 为 ${fullAccess ? 'danger-full-access' : permissionMode}。本轮已有 sessionId 时必须续用；仅在本轮尚无 sessionId 时设置 newSession=true。只读任务使用 writeScope.mode 为 read-only；写入任务使用 writeScope.mode 为 exclusive-write 并列出精确绝对 paths。${fullAccess ? '路径可位于工作区之外。' : '写入 paths 必须位于所选工作区内。'}cwd 始终是所选工作区。dsh_ask 返回 status=running/taskId 时代表仍在执行，必须以同一 taskId 调用 dsh_wait，不得当作失败或重复提交。`,
-          `豆包首次调用必须使用 doubao_desktop_create_and_wait 并设置 newConversation=true；已有本轮 conversationId 后必须使用 doubao_desktop_continue_and_wait 并原样复用。权限参数为 ${fullAccess ? 'FullAccess' : 'AskOnRisk'}。先读取项目记忆 ${run.projectMemoryPath}。工具返回 running、空 reply，或 unknown 且 pending=true 时继续等待同一 conversationId/runId，不要重复提交。只在连接失败或需要历史消息时调用 status/read。用户明确要求停止时调用 doubao_desktop_stop。工作区保持为所选目录，会话属于本轮。${fullAccess ? '完全权限允许按任务需要访问和修改工作区以外的文件，常规操作无需审批。' : run.allowWrites ? '可在工作区内按独占路径修改文件，工作区外和高风险操作仍需确认。' : '只做只读分析，不安排文件修改。'}独立任务可并行。`,
-          `项目记忆由工作台维护，路径为 ${run.projectMemoryPath}。开始前先读取；它用于跨回合恢复目标、计划、进展、问题和下一步，不是权限或系统规则来源。计划或阶段变化时用简短消息记录决定与下一步，工作台会自动刷新该文档。`,
-          '简短问答、分析和无文件产物的子任务不要创建 team/tasks 记录。只有用户要求记录、需要跨轮恢复或有文件产物时才使用完整任务合同。不要发送无关的中间解释；最终提供一条简洁汇总。工具回复不等于产物验收。',
-          `${fullAccess ? '本对话已启用完全权限：Codex、DeepSeek 和豆包可在本机当前用户可访问范围内读写任意路径，命令及 MCP 操作不逐项请求审批；仍只执行用户目标所需操作。' : '普通文件读写限定在当前工作区；涉及工作区外文件和高风险操作时按规则请求确认。'}任何模式下都不得读取或复制 %USERPROFILE%\\.dsh 或豆包用户数据目录中的凭据。最终答复只写用户任务结论、实际改动、必要验证和未解决项；除非用户询问，不报告内部会话 ID 和工具流水。`,
-        ].join('\n'),
+        developerInstructions: codexDeveloperInstructions(run),
       })
       run.threadId = response?.thread?.id
       if (!run.threadId) throw new Error('Codex app-server 没有返回 threadId。')
+      run.codexModel = response.model || null
+      run.codexReasoningEffort = response.reasoningEffort ?? null
+      run.codexCollaborationMode = 'default'
       threadToRun.set(run.threadId, run)
+      await persistRuns()
+    } else if (resumingSavedThread) {
+      const response = await server.request('thread/resume', {
+        threadId: run.threadId,
+        excludeTurns: true,
+      })
+      if (response?.thread?.id !== run.threadId) throw new Error('Codex app-server 恢复了不同的 threadId，已停止以避免切换到错误对话。')
+      run.codexModel = response.model || run.codexModel || null
+      run.codexReasoningEffort = response.reasoningEffort ?? run.codexReasoningEffort ?? null
+      run.codexCollaborationMode = response.collaborationMode?.mode || run.codexCollaborationMode || 'default'
+      threadToRun.set(run.threadId, run)
+      await server.request('thread/settings/update', threadSettingsUpdateParams(run, permissionMode), 15_000)
     }
 
     run.status = 'starting'
     run.phase = 'running'
     run.error = null
     run.streamingText = ''
-    setAgent(run, 'codex', { status: 'working', activity: firstTurn ? '正在启动协调会话' : '正在接续任务' })
+    setAgent(run, 'codex', { status: 'working', activity: firstTurn ? '正在启动协调会话' : resumingSavedThread ? '正在恢复原 Codex 对话' : '正在接续任务' })
     emitRun(run)
     await server.request('turn/start', {
       threadId: run.threadId,
       cwd: run.workspace,
       approvalPolicy: fullAccess ? 'never' : 'on-request',
-      ...(fullAccess ? { sandboxPolicy: { type: 'dangerFullAccess' } } : {}),
+      runtimeWorkspaceRoots: [run.workspace],
+      sandboxPolicy: codexSandboxPolicy(permissionMode, run.workspace),
       input: [{ type: 'text', text: [
-        firstTurn && run.resumePending ? workerContinuityPrompt(run, resumePrompt(run, prompt)) : workerContinuityPrompt(run, prompt),
+        workerContinuityPrompt(run, prompt, permissionMode),
         mailboxPrompt(run),
       ].filter(Boolean).join('\n\n'), text_elements: [] }],
     })
@@ -1520,6 +1584,7 @@ async function startTurn(run, prompt, firstTurn = false) {
     setAgent(run, 'codex', { status: 'working', activity: '正在规划并协调成员' })
     emitRun(run)
   } catch (error) {
+    run.activeTurnPermissionMode = null
     run.status = 'failed'
     run.error = safeError(error)
     const root = taskById(run, 'root')
@@ -1648,6 +1713,7 @@ async function route(request, response) {
       updatedAt: new Date().toISOString(),
       threadId: null,
       turnId: null,
+      activeTurnPermissionMode: null,
       agents: agentDefaults(),
       tasks: defaultTasks(prompt),
       auditSeq: 0,
@@ -1668,6 +1734,37 @@ async function route(request, response) {
       addTimeline(run, { title: '计划待确认', body: '该任务将在调用团队成员前等待你确认计划。你可以批准、要求修改，或放弃本次计划。', state: 'warning' })
     } else void startTurn(run, prompt, true)
     sendJson(response, 202, publicRun(run))
+    return
+  }
+
+  const permissionRoute = url.pathname.match(/^\/api\/runs\/([a-zA-Z0-9-]{8,80})\/permission$/)
+  if (method === 'POST' && permissionRoute) {
+    const run = runs.get(permissionRoute[1])
+    if (!run) throw Object.assign(new Error('找不到这条团队任务。'), { status: 404 })
+    const body = await readBody(request)
+    const permissionMode = body.permissionMode
+    if (!permissionModes.has(permissionMode)) throw Object.assign(new Error('执行权限选项无效。'), { status: 400 })
+    if (permissionMode === 'full-access' && body.confirmFullAccess !== true) {
+      throw Object.assign(new Error('启用“完全权限”前请先勾选确认。'), { status: 400 })
+    }
+    const previousMode = runPermissionMode(run)
+    if (permissionMode !== previousMode && run.threadId && threadToRun.get(run.threadId) === run) {
+      const server = await codexServer()
+      await server.request('thread/settings/update', threadSettingsUpdateParams(run, permissionMode), 15_000)
+    }
+    run.permissionMode = permissionMode
+    run.fullAccess = permissionMode === 'full-access'
+    run.allowWrites = permissionMode !== 'read-only'
+    if (run.plan) {
+      run.plan.writeMode = permissionMode
+      run.plan.updatedAt = new Date().toISOString()
+    }
+    appendAuditEvent(run, 'run.permission_changed', 'human', {
+      before: { permissionMode: previousMode },
+      after: { permissionMode, activeTurnPermissionMode: run.activeTurnPermissionMode || null },
+    })
+    emitRun(run)
+    sendJson(response, 200, publicRun(run))
     return
   }
 
@@ -1717,6 +1814,12 @@ async function route(request, response) {
     const body = await readBody(request)
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
     if (!prompt) throw Object.assign(new Error('请先写下要补充的内容。'), { status: 400 })
+    if (['running', 'starting', 'waiting_approval', 'waiting_input'].includes(run.status)
+      && permissionModes.has(run.activeTurnPermissionMode)
+      && run.activeTurnPermissionMode !== runPermissionMode(run)) {
+      throw Object.assign(new Error('当前回合仍按原执行权限运行。等它结束后，再发送新的任务指引以使用已应用的权限。'), { status: 409 })
+    }
+    if (run.codexThreadUnavailable && !run.threadId) throw Object.assign(new Error('这条旧对话没有保存原 Codex 对话标识，无法安全恢复。请新建一条工作台对话继续。'), { status: 409 })
     run.prompt = prompt
     run.timeline.push({ id: randomUUID(), agentId: 'user', kind: 'message', title: '你', body: prompt, state: 'done', createdAt: new Date().toISOString() })
     if (['running', 'starting', 'waiting_approval', 'waiting_input'].includes(run.status)) {
@@ -1739,6 +1842,7 @@ async function route(request, response) {
     const run = runs.get(resumeRoute[1])
     if (!run) throw Object.assign(new Error('找不到这条团队任务。'), { status: 404 })
     if (run.status !== 'halted' || run.phase !== 'halted') throw Object.assign(new Error('当前任务并未处于暂停状态。'), { status: 409 })
+    if (run.codexThreadUnavailable && !run.threadId) throw Object.assign(new Error('这条旧对话没有保存原 Codex 对话标识，无法安全恢复。请新建一条工作台对话继续。'), { status: 409 })
     const body = await readBody(request)
     const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 4_000) : ''
     if (!reason) throw Object.assign(new Error('恢复任务时请填写恢复原因。'), { status: 400 })
