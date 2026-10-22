@@ -322,11 +322,15 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .typing-caret { display: inline-block; width: 6px; height: 14px; margin-left: 2px; background: #32877c; vertical-align: -2px; animation: blink 1s step-end infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .composer { flex: 0 0 auto; max-width: 900px; width: 100%; margin: 5px auto 0; padding: 10px 12px 8px; background: #fff; border: 1px solid #cfd9da; border-radius: 7px; box-shadow: 0 2px 10px #253d480b; }
-.composer-workspace-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; padding-bottom: 7px; border-bottom: 1px solid #e9eeee; }
+.composer-workspace-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; min-height: 32px; padding-bottom: 7px; border-bottom: 1px solid #e9eeee; }
 .workspace-picker { display: flex; align-items: center; gap: 7px; min-width: 0; color: #5e7075; font-size: 11px; }
 .workspace-picker input { width: min(40vw, 450px); min-width: 120px; padding: 5px 6px; color: #3f5156; background: transparent; border: 1px solid transparent; border-radius: 4px; font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif; font-size: 11px; }
 .workspace-picker input:not(:disabled):hover { border-color: #dce5e5; }
 .workspace-picker input:disabled { color: #64757a; opacity: 1; }
+.project-memory-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 7px; color: #53666b; background: #f8faf9; border: 1px solid #dce4e5; border-radius: 4px; cursor: pointer; font-size: 10px; white-space: nowrap; }
+.project-memory-toggle:has(input:checked) { color: #235f5a; background: #f2f8f7; border-color: #b9d3cf; }
+.project-memory-toggle input { margin: 0; accent-color: var(--brand); }
+.project-memory-toggle:has(input:disabled) { opacity: .72; cursor: default; }
 .permission-picker { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .permission-picker legend { float: left; margin: 0; padding: 0; color: #5d7075; font-size: 10px; }
 .permission-controls { display: flex; align-items: center; justify-content: flex-end; gap: 7px; min-width: 0; }

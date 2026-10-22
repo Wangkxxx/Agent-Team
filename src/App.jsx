@@ -459,6 +459,7 @@ function App() {
     const saved = localStorage.getItem('agent-team.permission-mode')
     return saved === 'read-only' ? 'read-only' : 'workspace-write'
   })
+  const [projectMemoryEnabled, setProjectMemoryEnabled] = useState(false)
   const [fullAccessConfirmed, setFullAccessConfirmed] = useState(false)
   const [permissionBusy, setPermissionBusy] = useState(false)
   const allowWrites = permissionMode !== 'read-only'
@@ -577,11 +578,15 @@ function App() {
   }, [permissionMode])
 
   useEffect(() => {
-    if (!selectedRun) return
+    if (!selectedRun) {
+      setProjectMemoryEnabled(false)
+      return
+    }
     setWorkspace(selectedRun.workspace)
     setPermissionMode(selectedRun.permissionMode || (selectedRun.allowWrites ? 'workspace-write' : 'read-only'))
+    setProjectMemoryEnabled(selectedRun.projectMemoryEnabled !== false)
     setFullAccessConfirmed(false)
-  }, [selectedRun?.id, selectedRun?.permissionMode])
+  }, [selectedRun?.id, selectedRun?.permissionMode, selectedRun?.projectMemoryEnabled])
 
   useEffect(() => {
     shouldAutoScrollRef.current = true
@@ -653,6 +658,7 @@ function App() {
               prompt: text,
               workspace,
               permissionMode,
+              projectMemoryEnabled,
               allowWrites,
               confirmFullAccess: permissionMode === 'full-access' && fullAccessConfirmed,
             }),
@@ -843,6 +849,7 @@ function App() {
     setSelectedAgentId('codex')
     setActivityOpen(false)
     setPermissionMode('workspace-write')
+    setProjectMemoryEnabled(false)
     setFullAccessConfirmed(false)
     inputRef.current?.focus()
   }
@@ -1081,6 +1088,11 @@ function App() {
                 <FolderOpen size={15} />
                 <span>工作区</span>
                 <input value={workspace} onChange={event => setWorkspace(event.target.value)} aria-label="工作区路径" spellCheck="false" placeholder="C:\\Projects\\my-app" disabled={Boolean(selectedRun)} />
+              </label>
+              <label className="project-memory-toggle" title={selectedRun ? (selectedRun.projectMemoryEnabled ? '此对话已开启项目记忆' : '此对话未开启项目记忆') : '为新对话启用项目记忆'}>
+                <input type="checkbox" checked={projectMemoryEnabled} disabled={Boolean(selectedRun) || busy} onChange={event => setProjectMemoryEnabled(event.target.checked)} />
+                <FileText size={14} />
+                <span>项目记忆</span>
               </label>
               <div className="permission-controls">
                 <fieldset className="permission-picker" disabled={permissionBusy}>
