@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { appendFileSync, mkdirSync } from 'node:fs'
-import { lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1664,6 +1664,24 @@ async function steerRun(run, prompt) {
 async function route(request, response) {
   const url = new URL(request.url, `http://${host}:${port}`)
   const method = request.method || 'GET'
+
+  if (url.pathname === '/api/workspace/folders' && method === 'GET') {
+    const requested = url.searchParams.get('path') || ''
+    if (!requested) {
+      const drives = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(letter => letter + ':' + sep).filter(path => existsSync(path))
+      sendJson(response, 200, { path: '', parent: null, folders: drives.map(path => ({ name: path, path })) })
+      return
+    }
+    if (!isAbsolute(requested)) throw Object.assign(new Error('请选择绝对目录路径。'), { status: 400 })
+    const path = resolve(requested)
+    if (!(await stat(path)).isDirectory()) throw Object.assign(new Error('工作区必须是文件夹。'), { status: 400 })
+    const folders = (await readdir(path, { withFileTypes: true }))
+      .filter(entry => entry.isDirectory())
+      .map(entry => ({ name: entry.name, path: join(path, entry.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true }))
+    sendJson(response, 200, { path, parent: dirname(path) === path ? '' : dirname(path), folders })
+    return
+  }
 
   if (method === 'GET' && url.pathname === '/api/health') {
     sendJson(response, 200, await getHealth())

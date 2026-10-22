@@ -73,7 +73,7 @@ codex mcp add doubao_desktop `
 
 ## 启动和使用
 
-每次开机后，豆包需已经通过上节命令启用本机 CDP。**Codex 和 DSH 不需要启动**。然后双击 [启动 Agent Team.cmd](./启动%20Agent%20Team.cmd)，或在 PowerShell 运行：
+每次开机后，豆包需已经通过上节命令启用本机 CDP。**Codex 和 DSH 不需要启动**。然后双击 [Agent Team.cmd](./Agent%20Team.cmd)，或在 PowerShell 运行：
 
 ```powershell
 npm run start:team
@@ -137,3 +137,13 @@ node --check .\bridges\codex-doubao-desktop-gateway\src\server.mjs
 ```
 
 完整 bridge 测试会运行本地确定性检查；`npm run check` 额外检查当前机器上的 CLI、MCP 配置和豆包 CDP 状态。
+
+## 导航、工作区与桌面入口
+
+Windows 启动和配置脚本需要 PowerShell 7（`pwsh`）。
+
+- 左上角按钮可展开或收起任务导航。桌面端新建、切换任务保留侧栏状态；小屏幕选择后关闭抽屉。
+- 工作区可以手动输入绝对路径，也可以点击“选择文件夹”浏览本机目录。两种方式使用同一输入值；任务建立后工作区锁定。
+- 生成带专用图标的项目快捷方式：`npm run setup:shortcut`。同时创建桌面入口：`npm run setup:shortcut -- -Desktop`。
+- 生成的 `Agent Team.lnk` 使用当前项目绝对路径；移动项目后重新生成。发送到桌面时选择这个快捷方式，而非 `.cmd`，后者使用 Windows 默认脚本图标。
+- Windows 本地 API 测试：`npm test`（隔离临时数据，不调用模型）；生产构建：`npm run build`。

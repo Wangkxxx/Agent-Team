@@ -471,7 +471,11 @@ function App() {
   const [error, setError] = useState('')
   const [inspectorOpen, setInspectorOpen] = useState(() => window.matchMedia('(min-width: 1181px)').matches)
   const [activityOpen, setActivityOpen] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const folderDialogRef = useRef(null)
+  const [folderView, setFolderView] = useState({ path: '', parent: null, folders: [] })
+  const [folderError, setFolderError] = useState('')
+  const [pickingWorkspace, setPickingWorkspace] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia('(min-width: 761px)').matches)
   const [checking, setChecking] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -606,7 +610,7 @@ function App() {
   useEffect(() => {
     if (!sidebarOpen && !inspectorOpen) return undefined
     const closeOnEscape = event => {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return
       if (sidebarOpen) {
         setSidebarOpen(false)
         navigationToggleRef.current?.focus()
@@ -843,9 +847,24 @@ function App() {
     } finally { setMailBusy(false) }
   }
 
+  const browseWorkspace = async (path = '') => {
+    setPickingWorkspace(true)
+    setFolderError('')
+    try {
+      const response = await fetch('/api/workspace/folders?path=' + encodeURIComponent(path))
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '无法读取文件夹')
+      setFolderView(data)
+    } catch (error) { setFolderError(error.message) } finally { setPickingWorkspace(false) }
+  }
+  const selectWorkspace = () => {
+    folderDialogRef.current.showModal()
+    void browseWorkspace(workspace)
+  }
+
   const startNewRun = () => {
     setActiveRunId(null)
-    setSidebarOpen(false)
+    if (window.matchMedia('(max-width: 760px)').matches) setSidebarOpen(false)
     setSelectedAgentId('codex')
     setActivityOpen(false)
     setPermissionMode('workspace-write')
@@ -856,7 +875,7 @@ function App() {
 
   const selectRun = runId => {
     setActiveRunId(runId)
-    setSidebarOpen(false)
+    if (window.matchMedia('(max-width: 760px)').matches) setSidebarOpen(false)
     setEditingTitle(false)
     window.requestAnimationFrame(() => navigationToggleRef.current?.focus())
   }
@@ -917,7 +936,7 @@ function App() {
   )
 
   return (
-    <div className={`app-shell${inspectorOpen ? ' with-inspector' : ' inspector-closed'}`}>
+    <div className={`app-shell${inspectorOpen ? ' with-inspector' : ' inspector-closed'}${sidebarOpen ? '' : ' navigation-closed'}`}>
       {sidebarOpen && <button type="button" className="sidebar-scrim" onClick={closeSidebar} aria-label="关闭任务导航" />}
       <aside id="task-navigation" className={`navigation-rail${sidebarOpen ? ' mobile-open' : ''}`} aria-label="任务导航">
         <div className="brand-row">
@@ -971,7 +990,7 @@ function App() {
       <main className="main-column">
         <header className="topbar">
           <div className="breadcrumb">
-            <button type="button" className="icon-button mobile-nav-toggle" ref={navigationToggleRef} onClick={() => setSidebarOpen(true)} aria-label="打开任务导航" aria-controls="task-navigation" aria-expanded={sidebarOpen}>
+            <button type="button" className="icon-button navigation-toggle" ref={navigationToggleRef} onClick={() => setSidebarOpen(open => !open)} aria-label={sidebarOpen ? "收起任务导航" : "展开任务导航"} aria-controls="task-navigation" aria-expanded={sidebarOpen}>
               <Menu size={18} />
             </button>
             <span>工作台</span>
@@ -1087,8 +1106,9 @@ function App() {
               <label className="workspace-picker">
                 <FolderOpen size={15} />
                 <span>工作区</span>
-                <input value={workspace} onChange={event => setWorkspace(event.target.value)} aria-label="工作区路径" spellCheck="false" placeholder="C:\\Projects\\my-app" disabled={Boolean(selectedRun)} />
+                <input value={workspace} onChange={event => setWorkspace(event.target.value)} aria-label="工作区路径" spellCheck="false" placeholder="输入本机路径，或选择文件夹" disabled={Boolean(selectedRun)} />
               </label>
+              <button type="button" className="text-button workspace-select" onClick={selectWorkspace} disabled={Boolean(selectedRun) || pickingWorkspace}>选择文件夹</button>
               <label className="project-memory-toggle" title={selectedRun ? (selectedRun.projectMemoryEnabled ? '此对话已开启项目记忆' : '此对话未开启项目记忆') : '为新对话启用项目记忆'}>
                 <input type="checkbox" checked={projectMemoryEnabled} disabled={Boolean(selectedRun) || busy} onChange={event => setProjectMemoryEnabled(event.target.checked)} />
                 <FileText size={14} />
@@ -1176,6 +1196,17 @@ function App() {
           onClose={closeInspector}
         />
       )}
+      <dialog ref={folderDialogRef} className="roles-dialog folder-dialog" aria-labelledby="folder-heading">
+        <div className="role-dialog-header"><h2 id="folder-heading">选择本机工作区</h2><button type="button" className="icon-button" aria-label="关闭文件夹选择" onClick={() => folderDialogRef.current.close()}><X size={18} /></button></div>
+        <p>浏览本机磁盘和文件夹，选定后作为任务工作区。</p>
+        <div className="folder-navigation"><button type="button" className="button button-subtle" onClick={() => browseWorkspace('')} disabled={pickingWorkspace}>本机磁盘</button><button type="button" className="button button-subtle" onClick={() => browseWorkspace(folderView.parent)} disabled={pickingWorkspace || folderView.parent === null}>上一级</button></div>
+        <div className="folder-current" aria-live="polite">{folderView.path || '本机磁盘'}</div>
+        {folderError && <p role="alert">{folderError}</p>}
+        <div className="folder-list" aria-label="本机文件夹列表" aria-busy={pickingWorkspace}>
+          {pickingWorkspace ? <p>正在读取文件夹…</p> : folderView.folders.length ? folderView.folders.map(folder => <button type="button" className="folder-entry" key={folder.path} onClick={() => browseWorkspace(folder.path)}><FolderOpen size={17} />{folder.name}</button>) : <p>没有子文件夹，可选择当前文件夹。</p>}
+        </div>
+        <div className="role-dialog-actions"><button type="button" className="button button-subtle" onClick={() => folderDialogRef.current.close()}>取消</button><button type="button" className="button button-primary" disabled={!folderView.path || pickingWorkspace || Boolean(folderError)} onClick={() => { setWorkspace(folderView.path); folderDialogRef.current.close() }}>选择此文件夹</button></div>
+      </dialog>
       {utilityPanel === 'audit' && <AuditPanel run={selectedRun} events={auditEvents} loading={auditLoading} error={auditError} onRefresh={loadAudit} onClose={() => setUtilityPanel(null)} />}
       {utilityPanel === 'mailbox' && <MailboxPanel run={selectedRun} busy={mailBusy} onSend={sendMail} onClose={() => setUtilityPanel(null)} />}
     </div>

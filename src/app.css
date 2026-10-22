@@ -494,3 +494,25 @@ kbd { padding: 1px 4px; color: #506267; background: #f0f3f3; border: 1px solid #
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Desktop navigation can be collapsed without changing mobile drawer behavior. */
+.navigation-toggle { display: inline-flex; }
+@media (min-width: 761px) {
+  .app-shell.navigation-closed { grid-template-columns: minmax(0, 1fr) 318px; }
+  .app-shell.navigation-closed.inspector-closed { grid-template-columns: minmax(0, 1fr); }
+  .navigation-closed .navigation-rail { display: none; }
+}
+@media (min-width: 761px) and (max-width: 1180px) {
+  .app-shell.navigation-closed { grid-template-columns: minmax(0, 1fr); }
+}
+.roles-dialog { width: min(620px, calc(100vw - 32px)); max-height: 85vh; padding: 22px; color: var(--ink); background: white; border: 1px solid var(--line); border-radius: 12px; overflow-y: auto; }
+.roles-dialog::backdrop { background: #20373d66; }
+.role-dialog-header, .role-dialog-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.role-dialog-header h2 { margin: 0; font-size: 19px; }
+.roles-dialog p { color: #5f7075; font-size: 13px; line-height: 1.6; }
+.folder-navigation { display: flex; gap: 8px; }
+.folder-current { margin: 14px 0; padding: 10px; background: #f1f5f5; border-radius: 5px; font-size: 13px; overflow-wrap: anywhere; }
+.folder-list { height: 280px; overflow-y: auto; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 5px; }
+.folder-entry { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; background: white; color: var(--ink); text-align: left; border: 0; border-bottom: 1px solid #f1f4f4; font-size: 13px; }
+.folder-entry:hover, .folder-entry:focus-visible { background: #edf5f3; }
+.folder-list > p { padding: 12px; }

@@ -14,3 +14,6 @@ bridges/codex-doubao-desktop-gateway/data/
 *.log
 .DS_Store
 Thumbs.db
+
+# Generated Windows shortcuts contain machine-specific absolute paths.
+*.lnk
