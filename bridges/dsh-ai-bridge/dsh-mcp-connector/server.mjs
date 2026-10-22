@@ -46,6 +46,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '
 const FALLBACK_PROTOCOL_VERSION = '2025-11-25'
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.DSH_ASK_TIMEOUT_MS ?? 15 * 60 * 1000)
+const DSH_PERMISSION_MODES = new Set(['read-only', 'workspace-write', 'danger-full-access'])
 // Codex app-server currently gives an MCP call five minutes. Return control well
 // before that limit and let the caller poll the same locally-owned DSH process.
 const MAX_MCP_WAIT_MS = 55_000
@@ -327,6 +328,7 @@ function startDshTask(args) {
     cwd,
     timeoutMs: Number.isFinite(args.timeoutMs) ? Number(args.timeoutMs) : DEFAULT_TIMEOUT_MS,
     parseJsonLines: true,
+    extraEnv: { DSH_PERMISSION_MODE: args.permissionMode },
     onChild: child => { task.child = child },
   }).then(run => {
     task.outcome = dshTaskText(run, args)
@@ -363,13 +365,16 @@ async function dshAsk(args) {
   if (task.trim().length === 0) throw new Error('task must be a non-empty string')
 
   const requestedCwd = typeof args?.cwd === 'string' && args.cwd.trim().length > 0 ? args.cwd : process.env.DSH_WORKSPACE?.trim() || process.cwd()
-  const sessionId = args?.sessionId || implicitSessionByCwd.get(requestedCwd)
+  const permissionMode = args?.permissionMode || 'workspace-write'
+  if (!DSH_PERMISSION_MODES.has(permissionMode)) throw new Error('permissionMode must be read-only, workspace-write, or danger-full-access')
+  if (args?.newSession === true && args?.sessionId) throw new Error('newSession cannot be combined with sessionId')
+  const sessionId = args?.newSession === true ? undefined : args?.sessionId || implicitSessionByCwd.get(requestedCwd)
   if (sessionId !== undefined) {
     if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) {
       throw new Error('sessionId has an unexpected shape; use the id returned by a previous dsh_ask call')
     }
   }
-  const taskRun = startDshTask({ ...args, cwd: requestedCwd, task, sessionId })
+  const taskRun = startDshTask({ ...args, cwd: requestedCwd, task, sessionId, permissionMode })
   taskRun.cwd = requestedCwd
   const outcome = await waitForDshTask(taskRun, requestedWaitMs(args?.waitMs))
   if (taskRun.outcome?.sessionId && requestedCwd) implicitSessionByCwd.set(requestedCwd, taskRun.outcome.sessionId)
@@ -687,13 +692,15 @@ const TOOLS = [
   {
     name: 'dsh_ask',
     description:
-      'Deliver one message to the local DeepSeek Harness and return its final answer. Omit sessionId to start a new DSH session; pass the sessionId returned by a previous call to continue that same session.',
+      'Deliver one message to the local DeepSeek Harness and return its final answer. Set newSession=true on the first call for a workbench conversation and pass its returned sessionId on later calls. Set permissionMode explicitly to apply read-only, workspace-write, or danger-full-access to a new session.',
     inputSchema: {
       type: 'object',
       properties: {
         task: { type: 'string', description: 'The message/task text handed to DSH. Required and must not be blank.' },
         sessionId: { type: 'string', description: 'Optional. Continue an existing DSH session by id.' },
         cwd: { type: 'string', description: 'Optional absolute working directory for the DSH run.' },
+        permissionMode: { type: 'string', enum: ['read-only', 'workspace-write', 'danger-full-access'], description: 'Permission preset applied when creating a new DSH session.' },
+        newSession: { type: 'boolean', description: 'Start a fresh DSH session and do not reuse the connector workspace session.' },
         timeoutMs: { type: 'number', description: 'Optional timeout in milliseconds. Defaults to 900000.' },
         waitMs: { type: 'number', description: 'How long this MCP call waits before returning a running taskId. Maximum 55000ms.' },
         includeEvents: { type: 'boolean', description: 'Optional. Attach the raw event stream for debugging.' },

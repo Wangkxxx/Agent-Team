@@ -51,6 +51,8 @@ Install the [Skill](skills/doubao-desktop-executor/SKILL.md) into your Codex ski
 
 ## MCP tools
 
+The create-and-wait tool accepts newConversation=true to bypass the workspace's remembered conversation and force a clean session.
+
 | Tool | Purpose |
 | --- | --- |
 | `doubao_desktop_status` | Check localhost desktop connection |

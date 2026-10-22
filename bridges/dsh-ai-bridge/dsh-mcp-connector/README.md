@@ -576,7 +576,7 @@ DSH_WORKSPACE = "C:\\tools"
 
 | 工具 | 参数 | 作用 |
 |---|---|---|
-| `dsh_ask` | `task`（必填）、`sessionId?`、`cwd?`、`timeoutMs?`（默认 900000）、`includeEvents?` | 把一条消息投给 DSH 并返回最终答案 |
+| `dsh_ask` | `task`（必填）、`sessionId?`、`newSession?`、`permissionMode?`（`read-only` / `workspace-write` / `danger-full-access`）、`cwd?`、`timeoutMs?`（默认 900000）、`includeEvents?` | 把一条消息投给 DSH 并返回最终答案；权限模式用于新会话 |
 | `dsh_cli_info` | 无 | 自检：报告解析到的 dsh 可执行文件与 `dsh --version` 退出码 |
 | `connector_status` | 无 | 报告连接器自身状态：版本、传输、队列文件与任务计数、**哪些客户端连过（名字/版本/次数/最后活动时间）** |
 | `task_claim` | `worker?` | 领取队列里最老的一条待办；空队列返回 `no pending task` |
@@ -585,7 +585,7 @@ DSH_WORKSPACE = "C:\\tools"
 | `status_report` | `state`（必填：`start`/`progress`/`need-input`/`done`/`fail`）、`job`（必填）、`message?`、`step?`、`percent?` | **状态回报通道**：把一条状态事件写进 DSH Web 豆包徽章读的同一个 `status.jsonl`（spawn 现有的 `doubao-cdp/status.mjs`，不复制它的规则）。这是豆包桌面版本来就有的通道，普通 MCP 客户端没有——补上它，客户端干的活才会出现在徽章上，而不是只留在自己的对话里 |
 | `task_list` | `state?`（`pending`/`claimed`/`done`/`all`）、`limit?` | 只读查看队列，不领取 |
 
-`dsh_ask` 的返回末尾固定带一行 `sessionId: …`，把它记下来即可续会话。
+`dsh_ask` 的返回末尾固定带一行 `sessionId: …`，把它记下来即可续会话。工作台每条对话首次调用时传 `newSession=true`，隔离该工作台对话的 DSH session；之后传回该 sessionId。权限模式可显式设置为 `read-only`、`workspace-write` 或 `danger-full-access`。
 
 在客户端里可以这样用（自然语言）：
 

@@ -8,6 +8,7 @@ import {
   Clock3,
   Command,
   FileSearch,
+  FileText,
   FolderOpen,
   LoaderCircle,
   Mail,
@@ -453,7 +454,12 @@ function App() {
   const [selectedAgentId, setSelectedAgentId] = useState('codex')
   const [workspace, setWorkspace] = useState(() => localStorage.getItem('agent-team.workspace') || DEFAULT_WORKSPACE)
   const [drafts, setDrafts] = useState({})
-  const [allowWrites, setAllowWrites] = useState(true)
+  const [permissionMode, setPermissionMode] = useState(() => {
+    const saved = localStorage.getItem('agent-team.permission-mode')
+    return saved === 'read-only' ? 'read-only' : 'workspace-write'
+  })
+  const [fullAccessConfirmed, setFullAccessConfirmed] = useState(false)
+  const allowWrites = permissionMode !== 'read-only'
   const [busy, setBusy] = useState(false)
   const [pendingApprovals, setPendingApprovals] = useState({})
   const [resolvedApprovals, setResolvedApprovals] = useState({})
@@ -560,9 +566,14 @@ function App() {
   }, [workspace])
 
   useEffect(() => {
+    localStorage.setItem('agent-team.permission-mode', permissionMode === 'read-only' ? 'read-only' : 'workspace-write')
+  }, [permissionMode])
+
+  useEffect(() => {
     if (!selectedRun) return
     setWorkspace(selectedRun.workspace)
-    setAllowWrites(selectedRun.allowWrites)
+    setPermissionMode(selectedRun.permissionMode || (selectedRun.allowWrites ? 'workspace-write' : 'read-only'))
+    setFullAccessConfirmed(false)
   }, [selectedRun?.id])
 
   useEffect(() => {
@@ -620,7 +631,7 @@ function App() {
   const submitPrompt = async event => {
     event.preventDefault()
     const text = prompt.trim()
-    if (!text || busy) return
+    if (!text || busy || (!selectedRun && permissionMode === 'full-access' && !fullAccessConfirmed)) return
     setBusy(true)
     setError('')
     try {
@@ -628,7 +639,13 @@ function App() {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: text, workspace, allowWrites }),
+        body: JSON.stringify({
+          prompt: text,
+          workspace,
+          permissionMode,
+          allowWrites,
+          confirmFullAccess: !selectedRun && permissionMode === 'full-access' && fullAccessConfirmed,
+        }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || '任务没有提交成功。')
@@ -791,7 +808,8 @@ function App() {
     setSidebarOpen(false)
     setSelectedAgentId('codex')
     setActivityOpen(false)
-    setAllowWrites(true)
+    setPermissionMode('workspace-write')
+    setFullAccessConfirmed(false)
     inputRef.current?.focus()
   }
 
@@ -953,6 +971,8 @@ function App() {
             </div>
             <div className="run-meta-line">
               <span><FolderOpen size={13} /> {selectedRun?.workspace || workspace}</span>
+              {selectedRun?.projectMemoryPath && <span className="project-memory-path" title={selectedRun.projectMemoryPath}><FileText size={13} /> 项目记忆：{selectedRun.projectMemoryPath}</span>}
+              {selectedRun?.projectMemoryError && <span className="project-memory-error" title={selectedRun.projectMemoryError}>项目记忆更新失败</span>}
               {selectedRun?.createdAt && <span><Clock3 size={13} /> {new Date(selectedRun.createdAt).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' })}</span>}
             </div>
           </div>
@@ -1028,13 +1048,30 @@ function App() {
                 <span>工作区</span>
                 <input value={workspace} onChange={event => setWorkspace(event.target.value)} aria-label="工作区路径" spellCheck="false" placeholder="C:\\Projects\\my-app" disabled={Boolean(selectedRun)} />
               </label>
-              <label className={`write-toggle${allowWrites ? ' enabled' : ''}`} title="允许 Codex、DeepSeek 和豆包在当前工作区内按分配范围修改文件。危险操作仍会要求确认。">
-                <input type="checkbox" checked={allowWrites} disabled={Boolean(selectedRun)} onChange={event => setAllowWrites(event.target.checked)} />
-                <span className="toggle-track" />
-                <ShieldCheck size={14} />
-                <span>允许修改工作区</span>
-              </label>
+              <fieldset className="permission-picker" disabled={Boolean(selectedRun)}>
+                <legend>执行权限</legend>
+                <div className="permission-options" role="radiogroup" aria-label="选择本轮执行权限">
+                  <label className={permissionMode === 'read-only' ? 'selected' : ''}>
+                    <input type="radio" name="permission-mode" value="read-only" checked={permissionMode === 'read-only'} onChange={() => { setPermissionMode('read-only'); setFullAccessConfirmed(false) }} />
+                    <span>只读</span>
+                  </label>
+                  <label className={permissionMode === 'workspace-write' ? 'selected' : ''}>
+                    <input type="radio" name="permission-mode" value="workspace-write" checked={permissionMode === 'workspace-write'} onChange={() => { setPermissionMode('workspace-write'); setFullAccessConfirmed(false) }} />
+                    <span>工作区写入</span>
+                  </label>
+                  <label className={permissionMode === 'full-access' ? 'selected full-access-option' : ''}>
+                    <input type="radio" name="permission-mode" value="full-access" checked={permissionMode === 'full-access'} onChange={() => { setPermissionMode('full-access'); setFullAccessConfirmed(false) }} />
+                    <span>完全权限</span>
+                  </label>
+                </div>
+              </fieldset>
             </div>
+            {!selectedRun && permissionMode === 'full-access' && (
+              <label className="full-access-confirm">
+                <input type="checkbox" checked={fullAccessConfirmed} onChange={event => setFullAccessConfirmed(event.target.checked)} />
+                <span>我确认本轮成员可访问并修改当前用户有权访问的任意位置，常规操作不再请求审批。</span>
+              </label>
+            )}
             <div className="composer-input-row">
               <textarea
                 ref={inputRef}
@@ -1052,12 +1089,12 @@ function App() {
                 disabled={busy}
                 aria-label="任务内容"
               />
-              <button type="submit" className="send-button" disabled={!prompt.trim() || busy || !workspace.trim()} aria-label={selectedRun ? (isRunActive ? '追加任务指引' : '发送补充内容') : '开始团队任务'} title={selectedRun ? (isRunActive ? '向当前任务追加指引' : '发送补充内容') : '开始协作'}>
+              <button type="submit" className="send-button" disabled={!prompt.trim() || busy || !workspace.trim() || (!selectedRun && permissionMode === 'full-access' && !fullAccessConfirmed)} aria-label={selectedRun ? (isRunActive ? '追加任务指引' : '发送补充内容') : '开始团队任务'} title={selectedRun ? (isRunActive ? '向当前任务追加指引' : '发送补充内容') : '开始协作'}>
                 {busy ? <LoaderCircle size={18} className="spin" /> : <ArrowUp size={18} />}
               </button>
             </div>
             <div className="composer-footnote">
-              <span>{allowWrites ? '三名成员可在工作区内按分配范围修改文件；危险操作仍需确认。' : '只读模式 · 团队不会修改工作区。'}</span>
+              <span>{permissionMode === 'full-access' ? '完全权限 · 本机当前用户可访问的文件和操作均不受工作区限制。' : allowWrites ? '工作区写入 · 三名成员可在所选工作区按分配范围修改文件。' : '只读模式 · 团队不会修改文件。'}</span>
               <span><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行 · {prompt.length.toLocaleString()} / 30,000</span>
             </div>
           </form>

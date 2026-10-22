@@ -51,7 +51,9 @@ server.tool('doubao_desktop_create_task', 'Send a new task to a real Doubao desk
   objective: z.string().min(1).max(50_000),
   workspace: z.string().min(1),
   permission,
-}, tool(async ({ objective, workspace, permission }) => {
+  newConversation: z.literal(true).default(true),
+}, tool(async ({ objective, workspace, permission, newConversation }) => {
+  if (!newConversation) throw new Error('create_task always starts a new Doubao conversation');
   const workspacePath = checkedWorkspace(workspace);
   const result = await runCli([
     'sessions', 'create', objective, '--runtime', 'local', '--workspace', workspacePath, '--permission', permission,
@@ -59,15 +61,17 @@ server.tool('doubao_desktop_create_task', 'Send a new task to a real Doubao desk
   if (result?.conversationId) workspaceByConversation.set(workspacePath, result.conversationId);
   return result;
 }));
-server.tool('doubao_desktop_create_and_wait', 'Send a new task to Doubao and wait for its reply in one call. Running or unconfirmed results include IDs for continuing to wait; an unconfirmed result does not mean the task was cancelled.', {
+server.tool('doubao_desktop_create_and_wait', 'Send a task to Doubao and wait for its reply in one call. Set newConversation=true on the first call for a workbench conversation to bypass a remembered workspace conversation; later calls must pass that conversationId. Running or unconfirmed results include IDs for continuing to wait; an unconfirmed result does not mean the task was cancelled.', {
   objective: z.string().min(1).max(50_000),
   workspace: z.string().min(1),
   conversationId: id.optional(),
   permission,
+  newConversation: z.boolean().default(false),
   timeoutSeconds: waitSeconds,
-}, tool(async ({ objective, workspace, conversationId, permission, timeoutSeconds }) => {
+}, tool(async ({ objective, workspace, conversationId, permission, newConversation, timeoutSeconds }) => {
   const workspacePath = checkedWorkspace(workspace);
-  const existingConversationId = conversationId || workspaceByConversation.get(workspacePath);
+  if (newConversation && conversationId) throw new Error('newConversation cannot be combined with conversationId');
+  const existingConversationId = newConversation ? undefined : conversationId || workspaceByConversation.get(workspacePath);
   if (existingConversationId) {
     const result = await runCli([
       'sessions', 'send', existingConversationId, objective, '--runtime', 'local', '--permission', permission,
